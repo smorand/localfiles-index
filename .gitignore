@@ -9,7 +9,10 @@ bin/
 tests/fixtures/provided/
 tests/fixtures/generated/
 tests/fixtures/testdir/
-tests/fixtures/dossier*/
+tests/fixtures/dossier*
+
+# PDF extractor output
+*_extraction/
 
 # IDE
 .idea/
