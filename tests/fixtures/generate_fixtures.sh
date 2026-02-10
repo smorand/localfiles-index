@@ -172,55 +172,35 @@ except ImportError:
     print('SKIP: openpyxl not installed, skipping XLSX generation')
 "
 
-# --- PDF (using ImageMagick convert) ---
+# --- PDF (using fpdf2 for real text-based PDF) ---
 
 # Multi-page text PDF with known content
-python3 -c "
-from PIL import Image, ImageDraw
-pages = []
-page_texts = [
-    ['Page 1: Introduction to Machine Learning',
-     '',
-     'Machine learning is a subset of artificial intelligence',
-     'that focuses on building systems that learn from data.',
-     'Instead of being explicitly programmed, these systems',
-     'improve their performance through experience.',
-     '',
-     'Key concepts include supervised learning, unsupervised',
-     'learning, and reinforcement learning. Each approach has',
-     'specific use cases and applications in modern technology.'],
-    ['Page 2: Neural Networks and Deep Learning',
-     '',
-     'Neural networks are computing systems inspired by',
-     'biological neural networks in the human brain.',
-     'Deep learning uses multiple layers of neural networks',
-     'to progressively extract higher-level features.',
-     '',
-     'The term UNIQUE_KEYWORD_DEEPLEARNING appears here.',
-     'Convolutional neural networks excel at image recognition,',
-     'while recurrent networks handle sequential data well.'],
-    ['Page 3: Applications and Future Directions',
-     '',
-     'Machine learning applications span many industries:',
-     'healthcare, finance, transportation, and entertainment.',
-     'Natural language processing enables chatbots and',
-     'translation systems. Computer vision powers autonomous',
-     'vehicles and medical imaging analysis.',
-     '',
-     'Future directions include more efficient training,',
-     'better interpretability, and ethical AI frameworks.',
-     'Researchers are exploring quantum machine learning.']
-]
-for i, texts in enumerate(page_texts):
-    img = Image.new('RGB', (612, 792), color=(255, 255, 255))
-    draw = ImageDraw.Draw(img)
-    y = 50
-    for text in texts:
-        draw.text((50, y), text, fill='black')
-        y += 20
-    draw.text((500, 750), f'Page {i+1}', fill='gray')
-    pages.append(img)
-pages[0].save('$GENERATED_DIR/multipage.pdf', 'PDF', save_all=True, append_images=pages[1:], resolution=100.0)
+OUTDIR="$GENERATED_DIR" python3 -c "
+import os
+from fpdf import FPDF
+
+pdf = FPDF()
+pdf.set_auto_page_break(auto=True, margin=15)
+
+pdf.add_page()
+pdf.set_font('Helvetica', 'B', 16)
+pdf.cell(0, 10, 'Introduction to Machine Learning', new_x='LMARGIN', new_y='NEXT')
+pdf.set_font('Helvetica', '', 12)
+pdf.multi_cell(0, 7, 'Machine learning is a subset of artificial intelligence that focuses on building systems that learn from data. Instead of being explicitly programmed, these systems improve their performance through experience. Key concepts include supervised learning, unsupervised learning, and reinforcement learning. Each approach has specific use cases and applications in modern technology. Data preprocessing, feature engineering, and model evaluation are essential steps in the machine learning pipeline that determine the quality of results.')
+
+pdf.add_page()
+pdf.set_font('Helvetica', 'B', 16)
+pdf.cell(0, 10, 'Neural Networks and Deep Learning', new_x='LMARGIN', new_y='NEXT')
+pdf.set_font('Helvetica', '', 12)
+pdf.multi_cell(0, 7, 'Neural networks are computing systems inspired by biological neural networks in the human brain. Deep learning uses multiple layers of neural networks to progressively extract higher-level features. The term UNIQUE_KEYWORD_DEEPLEARNING appears in this context. Convolutional neural networks excel at image recognition, while recurrent networks handle sequential data well. Transformer architectures have revolutionized natural language processing and are now applied to computer vision tasks as well.')
+
+pdf.add_page()
+pdf.set_font('Helvetica', 'B', 16)
+pdf.cell(0, 10, 'Applications and Future Directions', new_x='LMARGIN', new_y='NEXT')
+pdf.set_font('Helvetica', '', 12)
+pdf.multi_cell(0, 7, 'Machine learning applications span many industries including healthcare, finance, transportation, and entertainment. Natural language processing enables chatbots and translation systems. Computer vision powers autonomous vehicles and medical imaging analysis. Future directions include more efficient training methods, better model interpretability, and the development of ethical AI frameworks. Researchers are exploring quantum machine learning and neuromorphic computing as next-generation approaches to artificial intelligence.')
+
+pdf.output(os.path.join(os.environ['OUTDIR'], 'multipage.pdf'))
 print('Generated multipage.pdf')
 "
 
