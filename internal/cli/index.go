@@ -23,7 +23,6 @@ var indexCmd = &cobra.Command{
 		path := args[0]
 
 		category, _ := cmd.Flags().GetString("category")
-		recursive, _ := cmd.Flags().GetBool("recursive")
 
 		// Create analyzer and embedder
 		anlz, err := analyzer.New(ctx, cfg.GeminiAPIKey, cfg.GeminiModel)
@@ -45,9 +44,6 @@ var indexCmd = &cobra.Command{
 		}
 
 		if stat.IsDir() {
-			if !recursive {
-				return fmt.Errorf("path is a directory, use --recursive to index all files")
-			}
 			return indexDirectory(ctx, idx, path, category)
 		}
 
@@ -105,7 +101,7 @@ func indexDirectory(ctx context.Context, idx *indexer.Indexer, dir string, categ
 }
 
 func init() {
-	indexCmd.Flags().StringP("category", "c", "", "Category name to assign")
-	indexCmd.Flags().BoolP("recursive", "r", false, "Recursively index directory")
+	indexCmd.Flags().StringP("category", "c", "", "Category name to assign (required)")
+	_ = indexCmd.MarkFlagRequired("category")
 	rootCmd.AddCommand(indexCmd)
 }

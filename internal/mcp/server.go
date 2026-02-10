@@ -324,6 +324,9 @@ func (s *Server) toolIndexFile(ctx context.Context, args map[string]interface{})
 	}
 
 	category, _ := args["category"].(string)
+	if category == "" {
+		return errorResult("category parameter is required"), nil
+	}
 
 	anlz, err := analyzer.New(ctx, s.cfg.GeminiAPIKey, s.cfg.GeminiModel)
 	if err != nil {

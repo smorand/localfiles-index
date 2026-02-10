@@ -98,7 +98,7 @@ fi
 # ---------------------------------------------------------------
 run_test "TS-021" "Index non-existent file"
 
-OUTPUT=$($BIN index "/nonexistent/path/file.jpg" 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "/nonexistent/path/file.jpg" --category cli_test 2>&1) && RC=0 || RC=$?
 if [ $RC -eq 0 ]; then
     fail_test "Expected error for non-existent file"
 else
@@ -115,7 +115,7 @@ fi
 run_test "TS-022" "Index unsupported file type"
 
 ABS_ZIP=$(cd "$FIXTURES" && pwd)/archive.zip
-OUTPUT=$($BIN index "$ABS_ZIP" 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_ZIP" --category cli_test 2>&1) && RC=0 || RC=$?
 if [ $RC -eq 0 ]; then
     fail_test "Expected error for unsupported file"
 else
@@ -132,8 +132,8 @@ fi
 run_test "TS-024" "Duplicate file indexing (re-index same file)"
 
 ABS_TXT=$(cd "$FIXTURES" && pwd)/sample_text.txt
-$BIN index "$ABS_TXT" >/dev/null 2>&1
-$BIN index "$ABS_TXT" >/dev/null 2>&1
+$BIN index "$ABS_TXT" --category cli_test >/dev/null 2>&1
+$BIN index "$ABS_TXT" --category cli_test >/dev/null 2>&1
 
 DOC_COUNT=$(db_query "SELECT count(*) FROM documents WHERE file_path = '$ABS_TXT';")
 assert_eq "no duplicate docs" "1" "$DOC_COUNT"
@@ -167,7 +167,7 @@ fi
 # ---------------------------------------------------------------
 # TS-039: Recursive Directory Indexing
 # ---------------------------------------------------------------
-run_test "TS-039" "Recursive directory indexing"
+run_test "TS-039" "Automatic directory indexing"
 
 # Create test directory structure
 TEST_DIR="$SCRIPT_DIR/fixtures/test_dir"
@@ -178,7 +178,7 @@ cp "$FIXTURES/archive.zip" "$TEST_DIR/unsupported.zip"
 cp "$FIXTURES/diagram.png" "$TEST_DIR/subdir/img2.png"
 
 ABS_TEST_DIR=$(cd "$TEST_DIR" && pwd)
-OUTPUT=$($BIN index "$ABS_TEST_DIR" --recursive --category cli_test 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_TEST_DIR" --category cli_test 2>/dev/null) && RC=0 || RC=$?
 assert_eq "recursive index exit" "0" "$RC"
 
 # Should have indexed 3 supported files
@@ -282,7 +282,7 @@ run_test "TS-045" "Verbose mode produces debug logs"
 
 # Index with verbose, capture stderr
 ABS_FR=$(cd "$FIXTURES" && pwd)/document_fr.txt
-OUTPUT=$($BIN index "$ABS_FR" -v 2>&1 1>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_FR" --category cli_test -v 2>&1 1>/dev/null) && RC=0 || RC=$?
 
 # Verbose output should contain debug-level log entries
 if echo "$OUTPUT" | grep -q '"level":"DEBUG"\|"level":"INFO"'; then

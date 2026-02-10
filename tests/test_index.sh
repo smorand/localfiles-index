@@ -170,7 +170,7 @@ fi
 run_test "TS-025" "Reject corrupt image file"
 
 CORRUPT_PATH=$(cd "$FIXTURES" && pwd)/corrupt_image.jpg
-OUTPUT=$($BIN index "$CORRUPT_PATH" 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$CORRUPT_PATH" --category administratif 2>&1) && RC=0 || RC=$?
 
 if [ $RC -eq 0 ]; then
     fail_test "Expected failure for corrupt image, got exit code 0"
@@ -205,7 +205,7 @@ fi
 run_test "TS-034" "Index a PNG image"
 
 PNG_PATH=$(cd "$FIXTURES" && pwd)/diagram.png
-OUTPUT=$($BIN index "$PNG_PATH" 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$PNG_PATH" --category administratif 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index PNG failed with exit code $RC"

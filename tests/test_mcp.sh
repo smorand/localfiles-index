@@ -354,7 +354,7 @@ fi
 run_test "TS-050" "MCP tool error paths"
 
 # Non-existent file
-ERR1=$(mcp_tool_call "index_file" '{"path":"/nonexistent/file.jpg"}' "$TOKEN" | parse_result)
+ERR1=$(mcp_tool_call "index_file" '{"path":"/nonexistent/file.jpg","category":"mcp_test"}' "$TOKEN" | parse_result)
 IS_ERR1=$(echo "$ERR1" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
 # Non-existent category

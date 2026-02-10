@@ -32,7 +32,7 @@ func getToolDefinitions() []ToolDefinition {
 					"path":     map[string]interface{}{"type": "string", "description": "Absolute path to the file to index"},
 					"category": map[string]interface{}{"type": "string", "description": "Category name to assign"},
 				},
-				"required": []string{"path"},
+				"required": []string{"path", "category"},
 			},
 		},
 		{

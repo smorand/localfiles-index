@@ -65,14 +65,11 @@ All configuration is via environment variables with sensible defaults:
 ### Index Files
 
 ```bash
-# Index an image
-./bin/localfiles-index-darwin-arm64 index /path/to/photo.jpg
-
-# Index with category
+# Index an image (category is required)
 ./bin/localfiles-index-darwin-arm64 index /path/to/passport.jpg --category administratif
 
-# Index a directory recursively
-./bin/localfiles-index-darwin-arm64 index /path/to/documents/ --recursive --category work
+# Index a directory (automatically recursive)
+./bin/localfiles-index-darwin-arm64 index /path/to/documents/ --category work
 ```
 
 ### Search

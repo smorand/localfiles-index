@@ -18,7 +18,7 @@ make db-setup       # Create PostgreSQL database
 ## Binary Usage
 
 ```bash
-./bin/localfiles-index-darwin-arm64 index <path> [-c category] [-r]
+./bin/localfiles-index-darwin-arm64 index <path> -c <category>       # category required; directories auto-recurse
 ./bin/localfiles-index-darwin-arm64 search <query> [-m semantic|fulltext] [-c category] [-f table|json|detail] [-l limit]
 ./bin/localfiles-index-darwin-arm64 categories add|list|update|remove <name>
 ./bin/localfiles-index-darwin-arm64 show <path|id> [--chunks]
@@ -70,6 +70,11 @@ tests/
 - Database: `postgresql://localfiles:localfiles@localhost:5432/localfiles`
 - API key: `GEMINI_API_KEY` env var required
 - PDF extraction: `pdf-extractor` binary (at `~/.local/bin/pdf-extractor`)
+
+## Maintenance Rules
+- Whenever you modify code, maintain specifications consistency and always update documentation (README.md and CLAUDE.md if relevant)
+- Always commit your modifications
+- Always ensure the e2e tests are up to date; before closing and committing, ensure `make e2e-test` is 100% compliant
 
 ## Documentation Index
 - `.agent_docs/golang.md` - Go coding standards and conventions

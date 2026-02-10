@@ -146,7 +146,7 @@ else
         echo "SKIP (sample.docx not generated)"
         PASS=$((PASS + 1))
     else
-        OUTPUT=$($BIN index "$DOCX_PATH" 2>/dev/null) && RC=0 || RC=$?
+        OUTPUT=$($BIN index "$DOCX_PATH" --category update_test 2>/dev/null) && RC=0 || RC=$?
         if [ $RC -ne 0 ]; then
             fail_test "DOCX indexing failed"
         else

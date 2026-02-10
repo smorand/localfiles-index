@@ -144,7 +144,7 @@ fi
 run_test "TS-004" "Index a plain text file"
 
 TXT_PATH=$(cd "$FIXTURES" && pwd)/sample_text.txt
-OUTPUT=$($BIN index "$TXT_PATH" 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$TXT_PATH" --category docs 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index text failed: $OUTPUT"
@@ -280,7 +280,7 @@ run_test "TS-051" "Reject empty/unreadable text file"
 
 EMPTY_TXT="$FIXTURES/empty_test.txt"
 touch "$EMPTY_TXT"
-OUTPUT=$($BIN index "$EMPTY_TXT" 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$EMPTY_TXT" --category docs 2>&1) && RC=0 || RC=$?
 
 if [ $RC -eq 0 ]; then
     fail_test "Expected failure for empty text file"
@@ -301,7 +301,7 @@ run_test "TS-052" "Reject corrupt spreadsheet files"
 CORRUPT_CSV="$FIXTURES/corrupt_test.csv"
 dd if=/dev/urandom of="$CORRUPT_CSV" bs=512 count=1 2>/dev/null
 
-OUTPUT=$($BIN index "$CORRUPT_CSV" 2>&1) && RC_CSV=0 || RC_CSV=$?
+OUTPUT=$($BIN index "$CORRUPT_CSV" --category data 2>&1) && RC_CSV=0 || RC_CSV=$?
 
 # Clean up
 rm -f "$CORRUPT_CSV"

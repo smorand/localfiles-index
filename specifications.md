@@ -213,10 +213,10 @@
 
 #### FR-014: Assign Category During Indexing
 
-- **Description**: The user must be able to specify a category when indexing a file. If no category is specified, the document is indexed without a category.
+- **Description**: The user must specify a category when indexing a file. Category is a mandatory parameter.
 - **Priority**: Must Have
 - **Acceptance Criteria**:
-  - [ ] Category can be provided as an option during indexing
+  - [ ] Category must be provided as a required parameter during indexing
   - [ ] The specified category must already exist
   - [ ] Documents can be re-assigned to a different category
 
@@ -515,7 +515,7 @@
 - **Type**: Automated
 - **Preconditions**: PostgreSQL running; a test .txt file with >100 words
 - **Steps**:
-  1. Run index command on the text file
+  1. Run index command on the text file with a category
   2. Query database for document and chunks
 - **Expected Results**:
   - [ ] Document record exists with document_type="text"
@@ -530,7 +530,7 @@
 - **Type**: Automated
 - **Preconditions**: PostgreSQL running; Gemini API key configured; a test CSV file
 - **Steps**:
-  1. Run index command on the CSV file
+  1. Run index command on the CSV file with a category
   2. Query database for document and chunks
 - **Expected Results**:
   - [ ] Document record exists with document_type="spreadsheet"
@@ -545,7 +545,7 @@
 - **Type**: Automated
 - **Preconditions**: LibreOffice installed; pdf-extractor available; a test .docx file
 - **Steps**:
-  1. Run index command on the DOCX file
+  1. Run index command on the DOCX file with a category
   2. Query database for document and chunks
 - **Expected Results**:
   - [ ] Document record exists with the original .docx file_path
@@ -685,7 +685,7 @@
 - **Type**: Automated
 - **Preconditions**: PostgreSQL running; Gemini API key configured; a test PNG image (e.g., a screenshot or diagram)
 - **Steps**:
-  1. Run index command on a PNG file
+  1. Run index command on a PNG file with a category
   2. Query database for document and chunks
 - **Expected Results**:
   - [ ] Document record exists with document_type="image" and correct mime_type
@@ -729,7 +729,7 @@
 - **Type**: Automated
 - **Preconditions**: PostgreSQL running; Gemini API configured; a test XLSX file (fixture: `sample.xlsx`)
 - **Steps**:
-  1. Run index command on the XLSX file
+  1. Run index command on the XLSX file with a category
   2. Query database for document and chunks
 - **Expected Results**:
   - [ ] Document record exists with document_type="spreadsheet"
@@ -793,13 +793,13 @@
 - **Validates**: FR-015, FR-018, FR-019, FR-020, NFR-007
 - **Priority**: Critical
 
-#### TS-039: Recursive Directory Indexing via CLI
+#### TS-039: Automatic Directory Indexing via CLI
 
-- **Description**: Verify that the `--recursive` flag indexes all supported files in a directory tree.
+- **Description**: Verify that passing a directory path automatically indexes all supported files in the directory tree (recursive by default).
 - **Type**: Automated
 - **Preconditions**: A directory with 2 supported files (image + text) and 1 unsupported file (.zip), with a subdirectory containing 1 more supported file
 - **Steps**:
-  1. Run `index /path/to/dir --recursive --category test`
+  1. Run `index /path/to/dir --category test`
   2. Run `status` to check document count
   3. Query database for documents
 - **Expected Results**:
@@ -899,7 +899,7 @@
 - **Type**: Automated
 - **Preconditions**: A test file available for indexing
 - **Steps**:
-  1. Run `index /path/to/test.jpg --verbose`
+  1. Run `index /path/to/test.jpg --category test --verbose`
   2. Capture stderr output
 - **Expected Results**:
   - [ ] Debug-level log lines appear in stderr (e.g., API request details, embedding generation, DB queries)
@@ -1044,7 +1044,7 @@
 - **Type**: Automated
 - **Preconditions**: MCP server running; valid OAuth token
 - **Steps**:
-  1. Call `index_file` with a non-existent file path
+  1. Call `index_file` with a non-existent file path and a valid category
   2. Call `index_file` with a non-existent category
   3. Call `get_document` with a non-existent path
   4. Call `get_document` with a non-existent ID
@@ -1064,7 +1064,7 @@
 - **Type**: Automated
 - **Preconditions**: A .txt file with no read permission (chmod 000) or a binary file renamed to .txt
 - **Steps**:
-  1. Run index command on the unreadable text file
+  1. Run index command on the unreadable text file with a valid category
 - **Expected Results**:
   - [ ] Exit code 1
   - [ ] Clear error message indicating the file cannot be read or parsed
@@ -1078,8 +1078,8 @@
 - **Type**: Automated
 - **Preconditions**: A file with .csv extension containing invalid/unparseable content (e.g., random binary data renamed to .csv) and a corrupt .xlsx file
 - **Steps**:
-  1. Run index command on the corrupt CSV file
-  2. Run index command on the corrupt XLSX file
+  1. Run index command on the corrupt CSV file with a valid category
+  2. Run index command on the corrupt XLSX file with a valid category
 - **Expected Results**:
   - [ ] Both return exit code 1
   - [ ] Clear error message for each case
@@ -1124,9 +1124,9 @@
 
 - **Description**: Verify proper error when indexing a file that does not exist.
 - **Type**: Automated
-- **Preconditions**: None
+- **Preconditions**: A category exists
 - **Steps**:
-  1. Run index command with a non-existent file path
+  1. Run index command with a non-existent file path and a valid category
 - **Expected Results**:
   - [ ] Exit code 1
   - [ ] Clear error message: "file not found"
@@ -1137,9 +1137,9 @@
 
 - **Description**: Verify proper error when indexing an unsupported file format.
 - **Type**: Automated
-- **Preconditions**: A binary file (e.g., .exe, .zip)
+- **Preconditions**: A binary file (e.g., .exe, .zip); a category exists
 - **Steps**:
-  1. Run index command on the unsupported file
+  1. Run index command on the unsupported file with a valid category
 - **Expected Results**:
   - [ ] Exit code 1
   - [ ] Clear error message indicating unsupported format
@@ -1163,9 +1163,9 @@
 
 - **Description**: Verify that indexing the same file twice does not create duplicates.
 - **Type**: Automated
-- **Preconditions**: A file already indexed
+- **Preconditions**: A file already indexed with a category
 - **Steps**:
-  1. Run index command on the same file again
+  1. Run index command on the same file again with the same category
 - **Expected Results**:
   - [ ] No duplicate document record
   - [ ] Existing record is updated (or no-op if unchanged)
@@ -1178,7 +1178,7 @@
 - **Type**: Automated
 - **Preconditions**: A zero-byte .jpg file or a renamed binary file with .jpg extension
 - **Steps**:
-  1. Run index command on the corrupt image
+  1. Run index command on the corrupt image with a valid category
 - **Expected Results**:
   - [ ] Exit code 1
   - [ ] Clear error message indicating invalid image
@@ -1192,8 +1192,8 @@
 - **Type**: Automated
 - **Preconditions**: A corrupt PDF file and a password-protected PDF file
 - **Steps**:
-  1. Run index command on the corrupt PDF
-  2. Run index command on the password-protected PDF
+  1. Run index command on the corrupt PDF with a valid category
+  2. Run index command on the password-protected PDF with a valid category
 - **Expected Results**:
   - [ ] Both return exit code 1
   - [ ] Clear error message for each case
@@ -1305,7 +1305,7 @@
 - **Preconditions**: A test file at a path containing spaces and accents (e.g., `tests/fixtures/generated/dossier été/facture café.txt`)
 - **Steps**:
   1. Create a directory with accented name and a file with spaces in its name
-  2. Run index command on the file
+  2. Run index command on the file with a category
   3. Search for the file content
   4. Run show command using the file path
 - **Expected Results**:
@@ -1322,8 +1322,8 @@
 - **Type**: Automated
 - **Preconditions**: A zero-byte .txt file and a PDF with no pages/content
 - **Steps**:
-  1. Run index command on the empty text file
-  2. Run index command on the empty PDF
+  1. Run index command on the empty text file with a valid category
+  2. Run index command on the empty PDF with a valid category
 - **Expected Results**:
   - [ ] Exit code 1 for each
   - [ ] Clear error message: "file is empty" or "no content to index"
@@ -1337,7 +1337,7 @@
 - **Type**: Automated
 - **Preconditions**: A large generated text file (~50,000 words)
 - **Steps**:
-  1. Run index command on the large file
+  1. Run index command on the large file with a category
   2. Query database for chunk count
   3. Search for content from the file
 - **Expected Results**:
@@ -1422,7 +1422,7 @@ tests/fixtures/
 │   ├── empty.pdf
 │   ├── large_text.txt
 │   └── large_50k.txt
-├── testdir/               # Directory structure for recursive indexing test (TS-039)
+├── testdir/               # Directory structure for directory indexing test (TS-039)
 │   ├── file1.jpg          # (copy of provided/screenshot.png)
 │   ├── file2.txt          # (copy of generated/sample.txt)
 │   ├── ignored.zip        # (unsupported file)
@@ -1523,13 +1523,14 @@ Index a file or directory into the search index.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--category` | `-c` | (none) | Category name to assign to the document(s) |
-| `--recursive` | `-r` | `false` | Recursively index all supported files in a directory |
+| `--category` | `-c` | (required) | Category name to assign to the document(s). **Required.** |
+
+When a directory is passed as `<path>`, all supported files are indexed recursively (automatic).
 
 **Examples**:
 ```bash
 localfiles-index index ~/Documents/passport.jpg --category administratif
-localfiles-index index ~/Documents/work/ --recursive --category travail
+localfiles-index index ~/Documents/work/ --category travail
 ```
 
 ---
@@ -1734,7 +1735,7 @@ These flags apply to all subcommands:
 | Tool Name | Description | Parameters |
 |-----------|-------------|------------|
 | `search` | Search indexed documents | `query` (string, required), `mode` (string: "semantic"\|"fulltext", default: "semantic"), `category` (string, optional), `limit` (int, default: 10) |
-| `index_file` | Index a file by path | `path` (string, required), `category` (string, optional) |
+| `index_file` | Index a file by path | `path` (string, required), `category` (string, required) |
 | `get_document` | Get document details | `id` (string, optional), `path` (string, optional) — one required |
 | `list_categories` | List all categories | (none) |
 | `delete_document` | Delete a document | `id` (string, optional), `path` (string, optional) — one required |
@@ -2206,7 +2207,7 @@ localfiles-index/
         │   ├── sample.txt
         │   ├── sample.csv
         │   └── ...
-        ├── testdir/              # Directory structure for recursive test
+        ├── testdir/              # Directory structure for directory indexing test
         └── README.md             # Fixture setup instructions
 ```
 
