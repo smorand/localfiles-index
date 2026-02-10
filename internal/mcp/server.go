@@ -74,6 +74,21 @@ func (s *Server) setupRoutes() {
 	// MCP endpoint (HTTP Streamable)
 	s.app.Post("/mcp", s.authMiddleware, s.handleMCP)
 
+	// REST API endpoints
+	api := s.app.Group("/api", s.authMiddleware)
+	api.Get("/documents", s.apiSearchDocuments)
+	api.Post("/documents", s.apiIndexDocument)
+	api.Get("/documents/:id", s.apiGetDocument)
+	api.Put("/documents/:id", s.apiUpdateDocument)
+	api.Put("/documents", s.apiUpdateAllDocuments)
+	api.Delete("/documents/:id", s.apiDeleteDocument)
+	api.Get("/categories", s.apiListCategories)
+	api.Get("/categories/:name", s.apiGetCategory)
+	api.Post("/categories", s.apiCreateCategory)
+	api.Put("/categories/:name", s.apiUpdateCategory)
+	api.Delete("/categories/:name", s.apiDeleteCategory)
+	api.Get("/status", s.apiStatus)
+
 	// Health check
 	s.app.Get("/health", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})

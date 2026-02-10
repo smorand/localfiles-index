@@ -236,12 +236,16 @@
 
 #### FR-016: Network API for Core Operations
 
-- **Description**: The system must expose a network API that provides the same core operations as the CLI (search, index, get document, list categories, status), enabling integration with external AI tools.
+- **Description**: The system must expose a network API that provides the same core operations as the CLI (search, index, get document, list categories, status), enabling integration with external AI tools. Two API interfaces are provided: (1) an MCP JSON-RPC endpoint at `POST /mcp` for AI tool integration, and (2) a REST JSON API at `/api` with standard RESTful conventions (resource IDs in paths, standard HTTP verbs).
 - **Priority**: Must Have
 - **Acceptance Criteria**:
-  - [ ] All search, indexing, category listing, and status operations are accessible via the API
+  - [ ] All search, indexing, category listing, and status operations are accessible via the MCP API
+  - [ ] All search, indexing, category CRUD, document CRUD, update, and status operations are accessible via the REST API
   - [ ] The API can be started via a CLI subcommand
   - [ ] The API port is configurable
+  - [ ] REST API uses proper HTTP verbs (GET/POST/PUT/DELETE) and resource-based URLs
+  - [ ] REST API returns direct JSON responses (not wrapped in JSON-RPC)
+  - [ ] REST API errors use `{"error": "message"}` format with appropriate HTTP status codes
 
 #### FR-017: Authenticated API Access
 
@@ -440,7 +444,7 @@
 | FR-013 | TS-013, TS-042 | TS-028 | Covered |
 | FR-014 | TS-001, TS-002, TS-038, TS-048 | TS-027 | Covered |
 | FR-015 | TS-014, TS-039, TS-040, TS-041, TS-042, TS-043, TS-044, TS-045 | TS-021 | Covered |
-| FR-016 | TS-016, TS-017, TS-046, TS-047, TS-048, TS-049 | TS-032, TS-050 | Covered |
+| FR-016 | TS-016, TS-017, TS-046, TS-047, TS-048, TS-049, TS-056 | TS-032, TS-050 | Covered |
 | FR-017 | TS-015 | TS-018 | Covered |
 | FR-018 | TS-014, TS-041 | TS-030 | Covered |
 | FR-019 | TS-014 | TS-031 | Covered |
@@ -1346,6 +1350,29 @@
   - [ ] Search returns relevant results from the file
 - **Validates**: FR-003, NFR-003
 - **Priority**: Low
+
+#### TS-056: REST API Endpoints
+
+- **Description**: Verify all REST API endpoints work correctly with proper authentication, CRUD operations, and error handling.
+- **Type**: Automated
+- **Preconditions**: MCP server running with OAuth credentials; a valid Bearer token; test fixtures available
+- **Steps**:
+  1. Verify unauthenticated requests to `/api` are rejected (401)
+  2. Categories CRUD: POST create → GET list → GET by name → PUT update → DELETE
+  3. Documents: POST index → GET by ID → GET search → DELETE
+  4. PUT /api/documents (update all) → verify response contains update counts
+  5. GET /api/status → verify stats response
+  6. Error cases: missing query param → 400, invalid UUID → 400, non-existent category → 400
+- **Expected Results**:
+  - [ ] All REST endpoints require Bearer token authentication
+  - [ ] Category CRUD operations work correctly via REST API
+  - [ ] Document index, get, search, and delete work correctly via REST API
+  - [ ] Update all documents returns update/unchanged/missing counts
+  - [ ] Status endpoint returns total_documents and total_chunks
+  - [ ] Missing required parameters return HTTP 400 with error message
+  - [ ] Invalid UUIDs return HTTP 400 with error message
+- **Validates**: FR-016, FR-017
+- **Priority**: High
 
 ### 5.6 Untestable Requirements
 

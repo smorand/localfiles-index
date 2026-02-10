@@ -1,7 +1,7 @@
 #!/bin/bash
-# Test: MCP HTTP Server (Lot 7)
+# Test: MCP HTTP Server & REST API (Lot 7)
 # Validates: FR-016, FR-017
-# Test Scenarios: TS-015, TS-016, TS-017, TS-018, TS-046, TS-047, TS-048, TS-049, TS-050, TS-032
+# Test Scenarios: TS-015, TS-016, TS-017, TS-018, TS-046, TS-047, TS-048, TS-049, TS-050, TS-032, TS-056
 
 set -e
 
@@ -30,7 +30,7 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('mcp_test', 'admin', 'work');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM categories WHERE name IN ('mcp_test', 'admin', 'work', 'api_test_cat', 'api_doc_test');" >/dev/null 2>&1 || true
     rm -rf /tmp/mcp-test-* 2>/dev/null || true
 }
 
@@ -423,6 +423,154 @@ if [ "$HAS_ERR1" = "yes" ] && [ "$HAS_ERR2" = "yes" ]; then
 else
     fail_test "mal1_err=$HAS_ERR1, mal2_err=$HAS_ERR2"
 fi
+
+# ---------------------------------------------------------------
+# TS-056: REST API Endpoints
+# ---------------------------------------------------------------
+
+# Helpers for REST API calls
+api_get() {
+    curl -s -H "Authorization: Bearer $TOKEN" "$MCP_URL$1"
+}
+
+api_post() {
+    curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" "$MCP_URL$1"
+}
+
+api_put() {
+    curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" "$MCP_URL$1"
+}
+
+api_delete() {
+    curl -s -X DELETE -H "Authorization: Bearer $TOKEN" "$MCP_URL$1"
+}
+
+api_get_status() {
+    curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "$MCP_URL$1"
+}
+
+api_post_status() {
+    curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" "$MCP_URL$1"
+}
+
+api_delete_status() {
+    curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "Authorization: Bearer $TOKEN" "$MCP_URL$1"
+}
+
+# --- REST API: Auth Required ---
+run_test "TS-056a" "REST API requires authentication"
+
+NO_AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$MCP_URL/api/status")
+if [ "$NO_AUTH_STATUS" = "401" ]; then
+    pass_test
+else
+    fail_test "Expected 401, got $NO_AUTH_STATUS"
+fi
+
+# --- REST API: Categories CRUD ---
+run_test "TS-056b" "REST API categories CRUD"
+
+# Create category
+CREATE_RESP=$(api_post "/api/categories" '{"name":"api_test_cat","description":"API test category"}')
+CREATE_NAME=$(echo "$CREATE_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null)
+
+# List categories
+LIST_RESP=$(api_get "/api/categories")
+HAS_CAT=$(echo "$LIST_RESP" | python3 -c "import json,sys; cats=json.load(sys.stdin); print('yes' if any(c.get('name')=='api_test_cat' for c in cats) else 'no')" 2>/dev/null)
+
+# Get by name
+GET_CAT=$(api_get "/api/categories/api_test_cat")
+GET_NAME=$(echo "$GET_CAT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null)
+
+# Update
+UPD_CAT=$(api_put "/api/categories/api_test_cat" '{"description":"Updated desc"}')
+UPD_DESC=$(echo "$UPD_CAT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('description',''))" 2>/dev/null)
+
+# Delete
+DEL_CAT=$(api_delete "/api/categories/api_test_cat")
+DEL_OK=$(echo "$DEL_CAT" | python3 -c "import json,sys; print('yes' if json.load(sys.stdin).get('deleted') else 'no')" 2>/dev/null)
+
+if [ "$CREATE_NAME" = "api_test_cat" ] && [ "$HAS_CAT" = "yes" ] && [ "$GET_NAME" = "api_test_cat" ] && [ "$UPD_DESC" = "Updated desc" ] && [ "$DEL_OK" = "yes" ]; then
+    pass_test
+else
+    fail_test "create=$CREATE_NAME list=$HAS_CAT get=$GET_NAME upd=$UPD_DESC del=$DEL_OK"
+fi
+
+# --- REST API: Documents (index, get, search, delete) ---
+run_test "TS-056c" "REST API document operations"
+
+# Ensure category exists
+api_post "/api/categories" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1
+
+# Index a file
+ABS_TXT_API=$(cd "$FIXTURES" && pwd)/sample_text.txt
+INDEX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_API\",\"category\":\"api_doc_test\"}")
+DOC_ID=$(echo "$INDEX_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('document_id',''))" 2>/dev/null)
+
+if [ -z "$DOC_ID" ] || [ "$DOC_ID" = "" ]; then
+    fail_test "Index via API failed: $INDEX_RESP"
+else
+    # Get document by ID
+    GET_DOC=$(api_get "/api/documents/$DOC_ID")
+    GET_TITLE=$(echo "$GET_DOC" | python3 -c "import json,sys; print(json.load(sys.stdin).get('title',''))" 2>/dev/null)
+
+    # Search
+    SEARCH_RESP=$(api_get "/api/documents?query=software+engineering&limit=5")
+    SEARCH_COUNT=$(echo "$SEARCH_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d, list) else 0)" 2>/dev/null || echo "0")
+
+    # Delete document
+    DEL_DOC=$(api_delete "/api/documents/$DOC_ID")
+    DEL_DOC_OK=$(echo "$DEL_DOC" | python3 -c "import json,sys; print('yes' if json.load(sys.stdin).get('deleted') else 'no')" 2>/dev/null)
+
+    if [ -n "$GET_TITLE" ] && [ "$GET_TITLE" != "" ] && [ "$SEARCH_COUNT" -gt 0 ] 2>/dev/null && [ "$DEL_DOC_OK" = "yes" ]; then
+        pass_test
+    else
+        fail_test "title=$GET_TITLE search=$SEARCH_COUNT del=$DEL_DOC_OK"
+    fi
+fi
+
+# --- REST API: Update All Documents ---
+run_test "TS-056d" "REST API update all documents"
+
+UPDATE_RESP=$(api_put "/api/documents" '{"force":false}')
+HAS_UPDATED=$(echo "$UPDATE_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'updated' in d else 'no')" 2>/dev/null)
+
+if [ "$HAS_UPDATED" = "yes" ]; then
+    pass_test
+else
+    fail_test "Update all response: $UPDATE_RESP"
+fi
+
+# --- REST API: Status ---
+run_test "TS-056e" "REST API status"
+
+STATUS_RESP=$(api_get "/api/status")
+HAS_TOTAL=$(echo "$STATUS_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'total_documents' in d else 'no')" 2>/dev/null)
+
+if [ "$HAS_TOTAL" = "yes" ]; then
+    pass_test
+else
+    fail_test "Status response: $STATUS_RESP"
+fi
+
+# --- REST API: Error Cases ---
+run_test "TS-056f" "REST API error responses"
+
+# Missing query param
+ERR_STATUS=$(api_get_status "/api/documents")
+# Invalid UUID
+ERR_UUID_STATUS=$(api_get_status "/api/documents/not-a-uuid")
+# Non-existent category
+ERR_CAT_STATUS=$(api_get_status "/api/categories/nonexistent_api_cat_xyz")
+
+if [ "$ERR_STATUS" = "400" ] && [ "$ERR_UUID_STATUS" = "400" ] && [ "$ERR_CAT_STATUS" = "400" ]; then
+    pass_test
+else
+    fail_test "missing_query=$ERR_STATUS invalid_uuid=$ERR_UUID_STATUS bad_cat=$ERR_CAT_STATUS"
+fi
+
+# Cleanup REST API test data
+api_delete "/api/categories/api_doc_test" >/dev/null 2>&1
 
 # ---------------------------------------------------------------
 # Summary

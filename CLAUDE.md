@@ -1,7 +1,7 @@
 # LocalFiles Index
 
 ## Overview
-Personal file indexing and semantic search system. Indexes local files (images, PDFs, text, spreadsheets) using Gemini AI and enables natural language retrieval via CLI and MCP HTTP API.
+Personal file indexing and semantic search system. Indexes local files (images, PDFs, text, spreadsheets) using Gemini AI and enables natural language retrieval via CLI, REST JSON API (`/api`), and MCP JSON-RPC API (`/mcp`).
 
 **Tech stack**: Go 1.25, PostgreSQL + pgvector, Gemini AI (Flash + embedding-001), Cobra CLI, Fiber HTTP, Bun ORM
 
@@ -47,8 +47,9 @@ internal/
   analyzer/analyzer.go           # Gemini AI analysis
   embedding/embedding.go         # Gemini embedding generation
   searcher/searcher.go           # Semantic + fulltext search
-  mcp/                           # MCP HTTP Streamable server
-    server.go                    # Fiber server + OAuth + JSON-RPC handler
+  mcp/                           # MCP HTTP Streamable server + REST API
+    server.go                    # Fiber server + OAuth + JSON-RPC handler + route setup
+    api.go                       # REST JSON API handlers (/api endpoints)
     tools.go                     # MCP tool definitions
     oauth.go                     # OAuth 2.1 client credentials
 tests/
@@ -59,7 +60,7 @@ tests/
   test_categories.sh             # Category CRUD tests (Lot 5)
   test_cli_workflow.sh           # Full CLI workflow tests (Lot 5)
   test_update.sh                 # Update & conversion tests (Lot 6)
-  test_mcp.sh                    # MCP HTTP server tests (Lot 7)
+  test_mcp.sh                    # MCP HTTP server + REST API tests (Lot 7)
   fixtures/generate_fixtures.sh  # Test fixture generator
 ```
 
