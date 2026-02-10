@@ -84,13 +84,16 @@ var categoriesRemoveCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		name := args[0]
-		force, _ := cmd.Flags().GetBool("force")
+		newCategory, _ := cmd.Flags().GetString("new-category")
 
-		if err := store.DeleteCategory(ctx, name, force); err != nil {
+		if err := store.DeleteCategory(ctx, name, newCategory); err != nil {
 			return err
 		}
 
 		fmt.Printf("Category deleted: %s\n", name)
+		if newCategory != "" {
+			fmt.Printf("Documents migrated to: %s\n", newCategory)
+		}
 		return nil
 	},
 }
@@ -98,7 +101,7 @@ var categoriesRemoveCmd = &cobra.Command{
 func init() {
 	categoriesAddCmd.Flags().String("description", "", "Category description")
 	categoriesUpdateCmd.Flags().String("description", "", "Category description")
-	categoriesRemoveCmd.Flags().Bool("force", false, "Delete even if documents reference this category")
+	categoriesRemoveCmd.Flags().String("new-category", "", "Migrate documents to this category before deleting")
 
 	categoriesCmd.AddCommand(categoriesListCmd, categoriesAddCmd, categoriesUpdateCmd, categoriesRemoveCmd)
 	rootCmd.AddCommand(categoriesCmd)

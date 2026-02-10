@@ -208,7 +208,7 @@
   - [ ] Categories can be created with a name and optional description
   - [ ] All categories can be listed
   - [ ] A category's name or description can be updated
-  - [ ] A category can be deleted only if no documents reference it (or with a force flag)
+  - [ ] A category can be deleted only if no documents reference it, or if `--new-category` is provided to migrate documents
   - [ ] Category names are unique
 
 #### FR-014: Assign Category During Indexing
@@ -843,19 +843,19 @@
 - **Validates**: FR-018, FR-015
 - **Priority**: Medium
 
-#### TS-042: Category Remove with Force Flag
+#### TS-042: Category Remove with Document Migration
 
-- **Description**: Verify that `categories remove --force` deletes a category even when documents reference it.
+- **Description**: Verify that `categories remove --new-category <target>` migrates documents and deletes the category.
 - **Type**: Automated
-- **Preconditions**: Category "temp" exists with 1 document referencing it
+- **Preconditions**: Category "temp" exists with 1 document referencing it; category "target" also exists
 - **Steps**:
-  1. Run `categories remove temp` (without force) — should fail
-  2. Run `categories remove temp --force` — should succeed
+  1. Run `categories remove temp` (without --new-category) — should fail
+  2. Run `categories remove temp --new-category target` — should succeed
   3. Query the document that referenced "temp"
 - **Expected Results**:
   - [ ] Step 1: exit code 1 with "category has documents" error
   - [ ] Step 2: exit code 0, category deleted
-  - [ ] Step 3: document still exists, category_id is null
+  - [ ] Step 3: document still exists, now references "target" category
 - **Validates**: FR-013, FR-015
 - **Priority**: Medium
 
@@ -1222,7 +1222,7 @@
 - **Preconditions**: Category "test" exists with at least one document referencing it
 - **Steps**:
   1. Run `categories add test` (duplicate)
-  2. Run `categories remove test` (referenced by documents, without force)
+  2. Run `categories remove test` (referenced by documents, without --new-category)
   3. Run `categories update nonexistent --description "x"`
 - **Expected Results**:
   - [ ] Step 1: exit code 1 with "already exists" error
@@ -1450,7 +1450,7 @@ tests/fixtures/
 │  update          │      │   - index_file        │
 │  delete          │      │   - get_document      │
 │  status          │      │   - list_categories   │
-│  serve ──────────┼──────│   - status            │
+│  mcp ────────────┼──────│   - status            │
 └────────┬─────────┘      └───────────┬───────────┘
          │                            │
          └─────────────┬──────────────┘
@@ -1642,14 +1642,14 @@ Manage document categories.
 | Flag | Applies to | Default | Description |
 |------|------------|---------|-------------|
 | `--description` | `add`, `update` | (none) | Category description |
-| `--force` | `remove` | `false` | Delete even if documents reference this category (sets their category to null) |
+| `--new-category` | `remove` | (none) | Migrate documents to this category before deleting |
 
 **Examples**:
 ```bash
 localfiles-index categories list
 localfiles-index categories add administratif --description "Documents administratifs"
 localfiles-index categories update administratif --description "Documents admin et juridiques"
-localfiles-index categories remove old-category --force
+localfiles-index categories remove old-category --new-category administratif
 ```
 
 ---
@@ -1670,7 +1670,7 @@ localfiles-index status --format json
 
 ---
 
-###### `localfiles-index serve`
+###### `localfiles-index mcp`
 
 Start the MCP HTTP Streamable server.
 
@@ -1681,8 +1681,8 @@ Start the MCP HTTP Streamable server.
 
 **Examples**:
 ```bash
-localfiles-index serve
-localfiles-index serve --port 9090 --credentials /path/to/creds.json
+localfiles-index mcp
+localfiles-index mcp --port 9090 --credentials /path/to/creds.json
 ```
 
 ---
@@ -1729,6 +1729,15 @@ These flags apply to all subcommands:
 - **Transport**: MCP HTTP Streamable (NOT SSE)
 - **Authentication**: OAuth 2.1
 - **Default Port**: 8080 (configurable via `MCP_PORT` env var)
+
+##### OAuth 2.1 Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/oauth/token` | POST | Token endpoint (client credentials grant) |
+| `/oauth/callback` | GET | OAuth callback for authorization code flow |
+| `/mcp` | POST | MCP JSON-RPC endpoint (requires Bearer token) |
+| `/health` | GET | Health check |
 
 ##### MCP Tools
 
@@ -2186,7 +2195,7 @@ localfiles-index/
 │       ├── update.go             # update subcommand
 │       ├── delete.go             # delete subcommand
 │       ├── status.go             # status subcommand
-│       └── serve.go              # serve subcommand (MCP server)
+│       └── mcp_cmd.go            # mcp subcommand (MCP server)
 └── tests/                        # Functional tests (shell scripts)
     ├── run_tests.sh              # Test runner
     ├── test_index.sh             # Indexing integration tests

@@ -67,8 +67,9 @@ func (s *Server) Shutdown() error {
 }
 
 func (s *Server) setupRoutes() {
-	// OAuth token endpoint
+	// OAuth endpoints
 	s.app.Post("/oauth/token", s.handleToken)
+	s.app.Get("/oauth/callback", s.handleOAuthCallback)
 
 	// MCP endpoint (HTTP Streamable)
 	s.app.Post("/mcp", s.authMiddleware, s.handleMCP)
@@ -132,6 +133,37 @@ func (s *Server) handleToken(c fiber.Ctx) error {
 		"access_token": token,
 		"token_type":   "Bearer",
 		"expires_in":   int(expiry.Seconds()),
+	})
+}
+
+// handleOAuthCallback handles the OAuth 2.1 callback redirect.
+func (s *Server) handleOAuthCallback(c fiber.Ctx) error {
+	code := c.Query("code")
+	state := c.Query("state")
+	errorParam := c.Query("error")
+
+	if errorParam != "" {
+		errorDesc := c.Query("error_description")
+		return c.Status(400).JSON(fiber.Map{
+			"error":             errorParam,
+			"error_description": errorDesc,
+		})
+	}
+
+	if code == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error":             "invalid_request",
+			"error_description": "missing authorization code",
+		})
+	}
+
+	// Exchange authorization code for token
+	token, expiry := s.tokenStore.IssueToken()
+	return c.JSON(fiber.Map{
+		"access_token": token,
+		"token_type":   "Bearer",
+		"expires_in":   int(expiry.Seconds()),
+		"state":        state,
 	})
 }
 

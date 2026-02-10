@@ -11,8 +11,8 @@ import (
 	"localfiles-index/internal/mcp"
 )
 
-var serveCmd = &cobra.Command{
-	Use:   "serve",
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
 	Short: "Start the MCP HTTP Streamable server",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
@@ -52,7 +52,7 @@ var serveCmd = &cobra.Command{
 }
 
 func init() {
-	serveCmd.Flags().IntP("port", "p", 8080, "Port to listen on")
-	serveCmd.Flags().String("credentials", "~/.credentials/scm-pwd-web.json", "Path to OAuth credentials")
-	rootCmd.AddCommand(serveCmd)
+	mcpCmd.Flags().IntP("port", "p", 8080, "Port to listen on")
+	mcpCmd.Flags().String("credentials", "~/.credentials/scm-pwd-web.json", "Path to OAuth credentials")
+	rootCmd.AddCommand(mcpCmd)
 }

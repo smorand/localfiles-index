@@ -47,7 +47,7 @@ fail_test() { echo "FAIL: $1"; ERRORS=$((ERRORS + 1)); }
 echo "=== Lot 7: MCP HTTP Server Tests ==="
 
 # Start MCP server in background
-$BIN serve --port $MCP_PORT --credentials "$CREDS" >/dev/null 2>&1 &
+$BIN mcp --port $MCP_PORT --credentials "$CREDS" >/dev/null 2>&1 &
 MCP_PID=$!
 
 # Wait for server to be ready
@@ -173,6 +173,29 @@ else
     else
         pass_test
     fi
+fi
+
+# ---------------------------------------------------------------
+# TS-049: OAuth Callback Endpoint
+# ---------------------------------------------------------------
+run_test "TS-049" "OAuth callback endpoint"
+
+# Callback without code — should return error
+CB_ERR=$(curl -s "$MCP_URL/oauth/callback")
+CB_ERR_OK=$(echo "$CB_ERR" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('error') == 'invalid_request' else 'no')" 2>/dev/null)
+
+# Callback with error param
+CB_ERR2=$(curl -s "$MCP_URL/oauth/callback?error=access_denied&error_description=user+denied")
+CB_ERR2_OK=$(echo "$CB_ERR2" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('error') == 'access_denied' else 'no')" 2>/dev/null)
+
+# Callback with code — should return token
+CB_OK=$(curl -s "$MCP_URL/oauth/callback?code=test-auth-code&state=test-state")
+CB_TOKEN=$(echo "$CB_OK" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'access_token' in d and d.get('state') == 'test-state' else 'no')" 2>/dev/null)
+
+if [ "$CB_ERR_OK" = "yes" ] && [ "$CB_ERR2_OK" = "yes" ] && [ "$CB_TOKEN" = "yes" ]; then
+    pass_test
+else
+    fail_test "cb_err=$CB_ERR_OK, cb_err2=$CB_ERR2_OK, cb_token=$CB_TOKEN"
 fi
 
 # Get a valid token for remaining tests

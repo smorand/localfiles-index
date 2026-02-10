@@ -125,8 +125,9 @@ func (s *Store) UpdateCategory(ctx context.Context, name, description string) (*
 	return cat, nil
 }
 
-// DeleteCategory deletes a category if no documents reference it (or force removes references).
-func (s *Store) DeleteCategory(ctx context.Context, name string, force bool) error {
+// DeleteCategory deletes a category. If documents reference it, newCategory must be provided
+// to migrate them. If no documents reference the category, it is deleted directly.
+func (s *Store) DeleteCategory(ctx context.Context, name string, newCategory string) error {
 	cat, err := s.GetCategoryByName(ctx, name)
 	if err != nil {
 		return fmt.Errorf("category not found: %s", name)
@@ -138,19 +139,24 @@ func (s *Store) DeleteCategory(ctx context.Context, name string, force bool) err
 		return fmt.Errorf("checking category references: %w", err)
 	}
 
-	if count > 0 && !force {
-		return fmt.Errorf("category has %d documents referencing it, use --force to delete", count)
+	if count > 0 && newCategory == "" {
+		return fmt.Errorf("category has %d documents referencing it, use --new-category to migrate them", count)
 	}
 
-	if count > 0 && force {
-		// Set category_id to null for all referencing documents
-		_, err := s.db.NewUpdate().
+	if count > 0 {
+		// Migrate documents to the new category
+		targetCat, err := s.GetCategoryByName(ctx, newCategory)
+		if err != nil {
+			return fmt.Errorf("target category not found: %s", newCategory)
+		}
+
+		_, err = s.db.NewUpdate().
 			Model((*Document)(nil)).
-			Set("category_id = NULL").
+			Set("category_id = ?", targetCat.ID).
 			Where("category_id = ?", cat.ID).
 			Exec(ctx)
 		if err != nil {
-			return fmt.Errorf("removing category references: %w", err)
+			return fmt.Errorf("migrating documents to category %s: %w", newCategory, err)
 		}
 	}
 

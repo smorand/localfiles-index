@@ -302,7 +302,7 @@ fi
 run_test "TS-053" "Help documentation for all subcommands"
 
 ALL_OK=true
-for cmd in index search categories show delete update status serve; do
+for cmd in index search categories show delete update status mcp; do
     HELP_OUT=$($BIN $cmd --help 2>&1) && RC=0 || RC=$?
     if [ $RC -ne 0 ]; then
         ALL_OK=false

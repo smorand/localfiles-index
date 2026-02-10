@@ -18,7 +18,7 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('cat_test', 'cat_temp', 'cat_force');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM categories WHERE name IN ('cat_test', 'cat_temp', 'cat_force', 'cat_migrate');" >/dev/null 2>&1 || true
 }
 
 assert_eq() {
@@ -74,31 +74,30 @@ else
 fi
 
 # ---------------------------------------------------------------
-# TS-042: Category Remove with Force Flag
+# TS-042: Category Remove with Document Migration
 # ---------------------------------------------------------------
-run_test "TS-042" "Category remove with --force when documents reference it"
+run_test "TS-042" "Category remove with --new-category migrates documents"
 
-# Setup: create category and index a file in it
+# Setup: create categories and index a file
 $BIN categories add cat_force --description "Force test" >/dev/null 2>&1
+$BIN categories add cat_migrate --description "Migration target" >/dev/null 2>&1
 ABS_PATH=$(cd "$FIXTURES" && pwd)/diagram.png
 $BIN index "$ABS_PATH" --category cat_force >/dev/null 2>&1
 
-# 1. Remove without force — should fail
+# 1. Remove without --new-category — should fail
 OUTPUT=$($BIN categories remove cat_force 2>&1) && RC=0 || RC=$?
 if [ $RC -eq 0 ]; then
-    fail_test "Remove without force should fail when docs reference it"
+    fail_test "Remove should fail when docs reference it without --new-category"
 else
-    # 2. Remove with force — should succeed
-    $BIN categories remove cat_force --force >/dev/null 2>&1 && RC=0 || RC=$?
-    assert_eq "force remove exit" "0" "$RC"
+    # 2. Remove with --new-category — should succeed and migrate docs
+    $BIN categories remove cat_force --new-category cat_migrate >/dev/null 2>&1 && RC=0 || RC=$?
+    assert_eq "remove with migration exit" "0" "$RC"
 
-    # 3. Document still exists, category_id is null
-    CAT_ID=$(db_query "SELECT category_id FROM documents WHERE file_path = '$ABS_PATH';")
-    if [ -n "$CAT_ID" ] && [ "$CAT_ID" != "" ]; then
-        fail_test "Document category_id should be null after force delete, got '$CAT_ID'"
-    else
-        pass_test
-    fi
+    # 3. Document should now be in cat_migrate
+    CAT_NAME=$(db_query "SELECT c.name FROM documents d JOIN categories c ON c.id = d.category_id WHERE d.file_path = '$ABS_PATH';")
+    assert_eq "document migrated to cat_migrate" "cat_migrate" "$CAT_NAME"
+
+    pass_test
 fi
 
 # ---------------------------------------------------------------

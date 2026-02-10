@@ -25,7 +25,7 @@ make db-setup       # Create PostgreSQL database
 ./bin/localfiles-index-darwin-arm64 delete <path|id> [-y]
 ./bin/localfiles-index-darwin-arm64 update [path] [-f]
 ./bin/localfiles-index-darwin-arm64 status [-f table|json]
-./bin/localfiles-index-darwin-arm64 serve [-p port] [--credentials path]
+./bin/localfiles-index-darwin-arm64 mcp [-p port] [--credentials path]
 ```
 
 ## Project Structure

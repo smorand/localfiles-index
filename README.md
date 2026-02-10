@@ -97,7 +97,7 @@ All configuration is via environment variables with sensible defaults:
 ./bin/localfiles-index-darwin-arm64 categories add administratif --description "Administrative docs"
 ./bin/localfiles-index-darwin-arm64 categories list
 ./bin/localfiles-index-darwin-arm64 categories update administratif --description "Updated description"
-./bin/localfiles-index-darwin-arm64 categories remove administratif [--force]
+./bin/localfiles-index-darwin-arm64 categories remove administratif [--new-category <name>]
 ```
 
 ### Document Management
@@ -124,7 +124,7 @@ All configuration is via environment variables with sensible defaults:
 
 ```bash
 # Start server
-./bin/localfiles-index-darwin-arm64 serve --port 8080 --credentials ~/.credentials/scm-pwd-web.json
+./bin/localfiles-index-darwin-arm64 mcp --port 8080 --credentials ~/.credentials/scm-pwd-web.json
 ```
 
 **OAuth authentication** (client credentials grant):
