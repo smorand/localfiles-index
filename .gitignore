@@ -1,0 +1,33 @@
+# Build
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+tests/fixtures/provided/
+tests/fixtures/generated/
+tests/fixtures/testdir/
+tests/fixtures/dossier*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env.local
+
+# Go
+vendor/
+
+# Credentials
+*.json.bak
