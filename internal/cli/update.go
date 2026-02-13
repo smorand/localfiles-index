@@ -59,13 +59,9 @@ func updateSingleFile(ctx context.Context, idx *indexer.Indexer, path string, fo
 		return nil
 	}
 
-	// Determine category name
+	// Determine category name by loading document with relations
 	categoryName := ""
 	if doc.CategoryID != nil {
-		cat, err := store.GetCategoryByName(ctx, "")
-		_ = cat
-		_ = err
-		// Look up category by ID instead
 		d, err := store.GetDocumentWithChunks(ctx, doc.ID)
 		if err == nil && d.Category != nil {
 			categoryName = d.Category.Name

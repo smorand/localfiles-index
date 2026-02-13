@@ -527,13 +527,12 @@ func (s *Server) toolUpdate(ctx context.Context, args map[string]interface{}) (*
 			return errorResult(fmt.Sprintf("document not found in index: %s", path)), nil
 		}
 
-		result, updated, err := s.updateSingleDocument(ctx, idx, doc, force)
+		result, _, err := s.updateSingleDocument(ctx, idx, doc, force)
 		if err != nil {
 			return errorResult(fmt.Sprintf("update failed: %v", err)), nil
 		}
 
 		return textResult(result), nil
-		_ = updated
 	}
 
 	// Update all

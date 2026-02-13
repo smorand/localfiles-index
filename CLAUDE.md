@@ -77,6 +77,11 @@ tests/
 - Always commit your modifications
 - Always ensure the e2e tests are up to date; before closing and committing, ensure `make e2e-test` is 100% compliant
 
+## Intentional Omissions
+- **No Go unit tests (`_test.go`)** — by design; all testing is done via E2E bash scripts in `tests/`
+- **No CI/CD pipeline** — by design; local-only project (see specifications.md §2.3 Non-Goals)
+
 ## Documentation Index
 - `.agent_docs/golang.md` - Go coding standards and conventions
+- `.agent_docs/makefile.md` - Makefile targets and usage documentation
 - `specifications.md` - Full project specifications with FR/TS references

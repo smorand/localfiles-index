@@ -112,7 +112,9 @@ func (s *Server) apiUpdateDocument(c fiber.Ctx) error {
 		Force bool `json:"force"`
 	}
 	if len(c.Body()) > 0 {
-		json.Unmarshal(c.Body(), &body)
+		if err := json.Unmarshal(c.Body(), &body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid JSON body"})
+		}
 	}
 
 	args := map[string]interface{}{
@@ -129,7 +131,9 @@ func (s *Server) apiUpdateAllDocuments(c fiber.Ctx) error {
 		Force bool `json:"force"`
 	}
 	if len(c.Body()) > 0 {
-		json.Unmarshal(c.Body(), &body)
+		if err := json.Unmarshal(c.Body(), &body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid JSON body"})
+		}
 	}
 	args := map[string]interface{}{
 		"force": body.Force,

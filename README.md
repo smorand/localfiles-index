@@ -60,6 +60,7 @@ All configuration is via environment variables with sensible defaults:
 | `PDF_EXTRACTOR_PATH` | `pdf-extractor` | Path to pdf-extractor binary |
 | `TITLE_CONFIDENCE_THRESHOLD` | `0.9` | Auto-accept title threshold |
 | `MCP_PORT` | `8080` | MCP server port |
+| `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `OAUTH_CREDENTIALS_PATH` | | Path to OAuth credentials JSON |
 
 ## CLI Usage
@@ -243,6 +244,15 @@ All errors return JSON with an `error` field and appropriate HTTP status code:
 | 400 | Client error (missing parameter, invalid UUID, not found) |
 | 401 | Unauthorized (missing or invalid Bearer token) |
 | 500 | Server error |
+
+### Health Check
+
+```bash
+# No authentication required
+curl http://localhost:8080/health
+```
+
+Returns: `{"status": "ok"}`
 
 ## MCP API (JSON-RPC)
 

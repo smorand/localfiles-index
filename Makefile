@@ -22,6 +22,7 @@ endif
         test test-unit test-all e2e-test \
         fmt vet lint check \
         clean clean-all init-mod init-deps \
+        docker-build docker-run \
         list-commands info help db-setup
 
 # Build targets
@@ -121,6 +122,18 @@ init-mod:
 init-deps: init-mod
 	@go mod tidy
 
+# Docker targets
+docker-build:
+	@docker build -t $(MODULE_NAME):latest .
+	@echo "Docker image built: $(MODULE_NAME):latest"
+
+docker-run:
+	@docker run --rm -p 8080:8080 \
+		-e GEMINI_API_KEY \
+		-e DATABASE_URL \
+		-e OAUTH_CREDENTIALS_PATH \
+		$(MODULE_NAME):latest
+
 # Database setup
 db-setup:
 	@echo "Creating PostgreSQL database..."
@@ -151,5 +164,6 @@ help:
 	@echo "  make e2e-test     Build + run functional tests"
 	@echo "  make check        Run all checks"
 	@echo "  make db-setup     Create PostgreSQL database"
+	@echo "  make docker-build Build Docker image"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make help         Show this help"

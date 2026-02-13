@@ -3,6 +3,7 @@ module localfiles-index
 go 1.25.7
 
 require (
+	github.com/gofiber/fiber/v3 v3.0.0
 	github.com/google/uuid v1.6.0
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/spf13/cobra v1.10.2
@@ -19,7 +20,6 @@ require (
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/gofiber/fiber/v3 v3.0.0 // indirect
 	github.com/gofiber/schema v1.6.0 // indirect
 	github.com/gofiber/utils/v2 v2.0.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect

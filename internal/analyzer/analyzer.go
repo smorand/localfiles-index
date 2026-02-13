@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"google.golang.org/genai"
 )
@@ -230,53 +232,26 @@ func extractText(result *genai.GenerateContentResponse) string {
 
 // cleanJSON removes markdown code fences from JSON responses.
 func cleanJSON(text string) string {
-	text = removePrefix(text, "```json")
-	text = removePrefix(text, "```")
-	text = removeSuffix(text, "```")
-	return trimSpace(text)
-}
-
-func removePrefix(s, prefix string) string {
-	if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
-		return s[len(prefix):]
-	}
-	return s
-}
-
-func removeSuffix(s, suffix string) string {
-	if len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix {
-		return s[:len(s)-len(suffix)]
-	}
-	return s
-}
-
-func trimSpace(s string) string {
-	// Simple trim since we can't import strings (avoid circular imports)
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\n' || s[start] == '\r' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\n' || s[end-1] == '\r' || s[end-1] == '\t') {
-		end--
-	}
-	return s[start:end]
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(text, "```")
+	return strings.TrimSpace(text)
 }
 
 func detectImageMimeType(path string) string {
-	ext := path[len(path)-4:]
-	switch {
-	case ext == ".jpg" || ext == "jpeg":
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg":
 		return "image/jpeg"
-	case ext == ".png":
+	case ".png":
 		return "image/png"
-	case ext == ".gif":
+	case ".gif":
 		return "image/gif"
-	case ext == "webp":
+	case ".webp":
 		return "image/webp"
-	case ext == "tiff" || ext == ".tif":
+	case ".tiff", ".tif":
 		return "image/tiff"
-	case ext == ".bmp":
+	case ".bmp":
 		return "image/bmp"
 	default:
 		return "image/jpeg"

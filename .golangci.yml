@@ -1,0 +1,40 @@
+# golangci-lint configuration
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - goconst
+    - bodyclose
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  goimports:
+    local-prefixes: localfiles-index
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: migrations/
+      linters:
+        - goconst
