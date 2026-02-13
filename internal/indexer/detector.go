@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// mimeDetectBufSize is the number of bytes read from a file header for MIME detection.
+const mimeDetectBufSize = 512
+
 // FileType represents the detected type of a file.
 type FileType string
 
@@ -85,7 +88,7 @@ func DetectFileType(path string) (*FileInfo, error) {
 		}
 		defer f.Close()
 
-		buf := make([]byte, 512)
+		buf := make([]byte, mimeDetectBufSize)
 		n, _ := f.Read(buf)
 		mimeType = http.DetectContentType(buf[:n])
 	}

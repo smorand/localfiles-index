@@ -15,6 +15,15 @@ import (
 	"localfiles-index/internal/storage"
 )
 
+const (
+	// maxTitleDisplayLen is the maximum display width for title columns.
+	maxTitleDisplayLen = 40
+	// maxPathDisplayLen is the maximum display width for path columns.
+	maxPathDisplayLen = 50
+	// maxExcerptDisplayLen is the maximum display width for excerpt text.
+	maxExcerptDisplayLen = 200
+)
+
 var searchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search indexed documents",
@@ -83,8 +92,8 @@ func formatTable(results []*storage.SearchResult) error {
 		if cat == "" {
 			cat = "-"
 		}
-		title := truncate(r.Title, 40)
-		path := truncate(r.FilePath, 50)
+		title := truncate(r.Title, maxTitleDisplayLen)
+		path := truncate(r.FilePath, maxPathDisplayLen)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.4f\t%s\n", title, path, r.DocumentType, cat, r.Similarity, page)
 	}
 	return w.Flush()
@@ -118,7 +127,7 @@ func formatDetail(results []*storage.SearchResult) error {
 		if r.SourcePage != nil {
 			fmt.Printf("  Page:     %d\n", *r.SourcePage)
 		}
-		fmt.Printf("  Excerpt:  %s\n", truncate(r.Excerpt, 200))
+		fmt.Printf("  Excerpt:  %s\n", truncate(r.Excerpt, maxExcerptDisplayLen))
 	}
 	return nil
 }

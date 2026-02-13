@@ -42,12 +42,15 @@ func (e *Embedder) EmbedQuery(ctx context.Context, text string) ([]float32, erro
 	return e.embed(ctx, text, "RETRIEVAL_QUERY")
 }
 
+// maxEmbeddingInputLen is the maximum character length of text sent for embedding.
+const maxEmbeddingInputLen = 8000
+
 func (e *Embedder) embed(ctx context.Context, text string, taskType string) ([]float32, error) {
 	slog.Debug("generating embedding", "text_length", len(text), "task_type", taskType)
 
 	// Truncate text if too long for embedding model
-	if len(text) > 8000 {
-		text = text[:8000]
+	if len(text) > maxEmbeddingInputLen {
+		text = text[:maxEmbeddingInputLen]
 	}
 
 	dims := int32(e.dimensions)

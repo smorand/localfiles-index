@@ -12,6 +12,13 @@ import (
 	"google.golang.org/genai"
 )
 
+const (
+	// maxTitleInputLen is the maximum character length of text sent for title generation.
+	maxTitleInputLen = 10000
+	// maxSummaryInputLen is the maximum character length of text sent for summary/analysis.
+	maxSummaryInputLen = 15000
+)
+
 // Analyzer performs AI-based content analysis using Gemini.
 type Analyzer struct {
 	client *genai.Client
@@ -124,8 +131,8 @@ func (a *Analyzer) GenerateTitle(ctx context.Context, text string) (*TitleResult
 
 	// Truncate text if too long
 	truncated := text
-	if len(truncated) > 10000 {
-		truncated = truncated[:10000]
+	if len(truncated) > maxTitleInputLen {
+		truncated = truncated[:maxTitleInputLen]
 	}
 
 	prompt := fmt.Sprintf(`Generate a descriptive title for the following document content. Return ONLY valid JSON:
@@ -158,8 +165,8 @@ func (a *Analyzer) GenerateSummary(ctx context.Context, text string) (string, er
 	slog.Debug("generating summary", "text_length", len(text))
 
 	truncated := text
-	if len(truncated) > 15000 {
-		truncated = truncated[:15000]
+	if len(truncated) > maxSummaryInputLen {
+		truncated = truncated[:maxSummaryInputLen]
 	}
 
 	prompt := fmt.Sprintf(`Write a summary of approximately 100 words for the following document content. Return ONLY the summary text, no JSON, no markdown formatting.
@@ -184,8 +191,8 @@ func (a *Analyzer) DescribeSpreadsheet(ctx context.Context, content string) (*Sp
 	slog.Debug("analyzing spreadsheet", "content_length", len(content))
 
 	truncated := content
-	if len(truncated) > 15000 {
-		truncated = truncated[:15000]
+	if len(truncated) > maxSummaryInputLen {
+		truncated = truncated[:maxSummaryInputLen]
 	}
 
 	prompt := fmt.Sprintf(`Analyze this spreadsheet content and return ONLY valid JSON:

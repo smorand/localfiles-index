@@ -8,6 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// maxChunkDisplayLen is the maximum display width for chunk content preview.
+const maxChunkDisplayLen = 200
+
 var showCmd = &cobra.Command{
 	Use:   "show <path|id>",
 	Short: "Display full details of an indexed document",
@@ -64,7 +67,7 @@ var showCmd = &cobra.Command{
 					fmt.Printf(" page=%d", *ch.SourcePage)
 				}
 				fmt.Println()
-				fmt.Printf("      %s\n", truncate(ch.Content, 200))
+				fmt.Printf("      %s\n", truncate(ch.Content, maxChunkDisplayLen))
 			}
 		}
 
