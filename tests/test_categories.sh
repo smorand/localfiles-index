@@ -3,7 +3,7 @@
 # Validates: FR-013, FR-015
 # Test Scenarios: TS-013, TS-042
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$SCRIPT_DIR/../bin/localfiles-index-darwin-arm64"

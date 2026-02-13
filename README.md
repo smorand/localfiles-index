@@ -4,7 +4,7 @@ Personal file indexing and semantic search system that extracts metadata from lo
 
 ## Features
 
-- **Index** images (JPEG, PNG, GIF, WebP, TIFF, BMP), PDFs, text files (TXT, MD), spreadsheets (CSV, XLSX), and documents (DOC, DOCX, ODT)
+- **Index** images (JPEG, PNG, GIF, WebP, TIFF, BMP), PDFs, text files (TXT, MD, RST, LOG), spreadsheets (CSV, XLSX), and documents (DOC, DOCX, ODT)
 - **Semantic search** using vector similarity with Gemini embeddings
 - **Full-text search** using PostgreSQL tsvector
 - **Category management** for organizing indexed files
@@ -69,6 +69,9 @@ All configuration is via environment variables with sensible defaults:
 
 ```bash
 ./bin/localfiles-index-darwin-arm64 mcp --port 8080 --credentials /path/to/credentials.json
+
+# Default credentials path: ~/.credentials/scm-pwd-web.json
+# Enable debug logging with --verbose / -v
 ```
 
 ### Index Files

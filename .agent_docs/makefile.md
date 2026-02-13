@@ -9,8 +9,7 @@ Generic Makefile for Go projects with multi-command support. Requires `cmd/` dir
 ```
 project/
 ├── cmd/
-│   ├── command1/main.go
-│   └── command2/main.go
+│   └── localfiles-index/main.go
 ├── internal/
 └── Makefile
 ```
@@ -23,8 +22,6 @@ project/
 | `DEFAULT_BINARY_NAME` | First command in `cmd/` | - |
 | `MODULE_NAME` | Go module name | `$(DEFAULT_BINARY_NAME)` |
 | `BUILD_DIR` | Output directory for binaries | `bin` |
-| `MAKE_DOCKER_PREFIX` | Docker registry prefix | empty |
-| `DOCKER_TAG` | Docker image tag | `latest` |
 
 ## Build Targets
 
@@ -49,7 +46,6 @@ make run CMD=<command> ARGS='<arguments>'
 | Target | Description |
 |--------|-------------|
 | `install` | Install binaries to `~/.local/bin` (or `/usr/local/bin` as root) |
-| `install-launcher` | Install launcher scripts with all platform binaries |
 | `uninstall` | Remove installed binaries |
 
 Override install directory with `TARGET`:
@@ -62,8 +58,9 @@ make install TARGET=/custom/path
 | Target | Description |
 |--------|-------------|
 | `test` | Run functional tests (`tests/run_tests.sh`) |
-| `test-unit` | Run Go unit tests |
-| `test-all` | Run both functional and unit tests |
+| `test-unit` | Run Go unit tests (`go test ./...`) |
+| `test-all` | Run both unit and functional tests |
+| `e2e-test` | Build + run functional tests |
 
 ## Code Quality Targets
 
@@ -72,20 +69,20 @@ make install TARGET=/custom/path
 | `fmt` | Format code with `go fmt` |
 | `vet` | Run `go vet` |
 | `lint` | Run `golangci-lint` (falls back to `go vet`) |
-| `check` | Run fmt, vet, lint, and test |
+| `check` | Run fmt, vet, lint, then test-all (unit + functional) |
 
 ## Docker Targets
 
 | Target | Description |
 |--------|-------------|
-| `docker` | Build and push all Docker images |
-| `docker-build` | Build Docker images for all commands |
-| `docker-push` | Push Docker images to registry |
+| `docker-build` | Build Docker image (`MODULE_NAME:latest`) |
+| `docker-run` | Run Docker image with `GEMINI_API_KEY`, `DATABASE_URL`, `OAUTH_CREDENTIALS_PATH` |
 
-Example with custom registry:
-```bash
-MAKE_DOCKER_PREFIX=gcr.io/my-project/ DOCKER_TAG=v1.0.0 make docker
-```
+## Database Target
+
+| Target | Description |
+|--------|-------------|
+| `db-setup` | Create PostgreSQL user, database, and pgvector extension |
 
 ## Other Targets
 

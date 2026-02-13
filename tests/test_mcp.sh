@@ -1,9 +1,9 @@
 #!/bin/bash
 # Test: MCP HTTP Server & REST API (Lot 7)
 # Validates: FR-016, FR-017
-# Test Scenarios: TS-015, TS-016, TS-017, TS-018, TS-046, TS-047, TS-048, TS-049, TS-050, TS-032, TS-056
+# Test Scenarios: TS-015, TS-016, TS-017, TS-018, TS-046, TS-047, TS-048, TS-049, TS-050, TS-032, TS-056, TS-057, TS-058, TS-059
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$SCRIPT_DIR/../bin/localfiles-index-darwin-arm64"
@@ -570,6 +570,93 @@ else
 fi
 
 # Cleanup REST API test data
+api_delete "/api/categories/api_doc_test" >/dev/null 2>&1
+
+# ---------------------------------------------------------------
+# TS-057: MCP tools/list Method
+# ---------------------------------------------------------------
+run_test "TS-057" "MCP tools/list returns all tool definitions"
+
+TOOLS_RESP=$(mcp_call "tools/list" "{}" "$TOKEN")
+TOOL_COUNT=$(echo "$TOOLS_RESP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+tools = d.get('result', {}).get('tools', [])
+print(len(tools))
+" 2>/dev/null || echo "0")
+
+TOOL_NAMES=$(echo "$TOOLS_RESP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+tools = d.get('result', {}).get('tools', [])
+names = sorted([t.get('name','') for t in tools])
+print(','.join(names))
+" 2>/dev/null || echo "")
+
+EXPECTED_TOOLS="delete_document,get_document,index_file,list_categories,search,status,update"
+if [ "$TOOL_COUNT" -eq 7 ] && [ "$TOOL_NAMES" = "$EXPECTED_TOOLS" ]; then
+    pass_test
+else
+    fail_test "Expected 7 tools ($EXPECTED_TOOLS), got $TOOL_COUNT ($TOOL_NAMES)"
+fi
+
+# ---------------------------------------------------------------
+# TS-058: MCP update Tool
+# ---------------------------------------------------------------
+run_test "TS-058" "MCP update tool"
+
+# Index a file first
+ABS_UPDATE=$(cd "$FIXTURES" && pwd)/sample_text.txt
+$BIN index "$ABS_UPDATE" --category mcp_test >/dev/null 2>&1 || true
+
+# Call update via MCP (single file path, no force)
+UPDATE_RESP=$(mcp_tool_call "update" "{\"path\":\"$ABS_UPDATE\",\"force\":false}" "$TOKEN" | parse_result)
+HAS_UPDATED=$(echo "$UPDATE_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'updated' in d or 'skipped' in d else 'no')" 2>/dev/null)
+
+# Call update with force
+UPDATE_FORCE=$(mcp_tool_call "update" "{\"path\":\"$ABS_UPDATE\",\"force\":true}" "$TOKEN" | parse_result)
+HAS_FORCE=$(echo "$UPDATE_FORCE" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'updated' in d else 'no')" 2>/dev/null)
+
+if [ "$HAS_UPDATED" = "yes" ] && [ "$HAS_FORCE" = "yes" ]; then
+    pass_test
+else
+    fail_test "update=$HAS_UPDATED, force=$HAS_FORCE"
+fi
+
+# ---------------------------------------------------------------
+# TS-059: REST API PUT /api/documents/:id (single document update)
+# ---------------------------------------------------------------
+run_test "TS-059" "REST API update single document by ID"
+
+# Ensure a doc is indexed
+api_post "/api/categories" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1 || true
+ABS_TXT_UPD=$(cd "$FIXTURES" && pwd)/sample_text.txt
+IDX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_UPD\",\"category\":\"api_doc_test\"}")
+UPD_DOC_ID=$(echo "$IDX_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('document_id',''))" 2>/dev/null)
+
+if [ -z "$UPD_DOC_ID" ] || [ "$UPD_DOC_ID" = "" ]; then
+    fail_test "Could not index document for update test: $IDX_RESP"
+else
+    # Update with force=true
+    api_put_status() {
+        curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" "$MCP_URL$1"
+    }
+    UPD_STATUS=$(api_put_status "/api/documents/$UPD_DOC_ID" '{"force":true}')
+    UPD_BODY=$(api_put "/api/documents/$UPD_DOC_ID" '{"force":true}')
+    HAS_UPD=$(echo "$UPD_BODY" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'updated' in d else 'no')" 2>/dev/null)
+
+    # Update non-existent UUID
+    BAD_UPD_STATUS=$(api_put_status "/api/documents/00000000-0000-0000-0000-000000000000" '{"force":true}')
+
+    if [ "$UPD_STATUS" = "200" ] && [ "$HAS_UPD" = "yes" ] && [ "$BAD_UPD_STATUS" = "400" ]; then
+        pass_test
+    else
+        fail_test "status=$UPD_STATUS has_updated=$HAS_UPD bad_status=$BAD_UPD_STATUS"
+    fi
+
+    # Cleanup
+    api_delete "/api/documents/$UPD_DOC_ID" >/dev/null 2>&1
+fi
 api_delete "/api/categories/api_doc_test" >/dev/null 2>&1
 
 # ---------------------------------------------------------------

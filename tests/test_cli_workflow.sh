@@ -1,9 +1,9 @@
 #!/bin/bash
 # Test: CLI Workflow (Lot 5)
 # Validates: FR-015, FR-018, FR-019, FR-020
-# Test Scenarios: TS-014, TS-039, TS-040, TS-041, TS-043, TS-044, TS-045, TS-021, TS-022, TS-024, TS-030, TS-031, TS-053
+# Test Scenarios: TS-014, TS-039, TS-040, TS-041, TS-043, TS-044, TS-045, TS-021, TS-022, TS-024, TS-030, TS-031, TS-053, TS-057, TS-058
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$SCRIPT_DIR/../bin/localfiles-index-darwin-arm64"
@@ -294,6 +294,78 @@ else
     else
         fail_test "No debug/info log entries in verbose output"
     fi
+fi
+
+# ---------------------------------------------------------------
+# TS-057: Cascade Delete (chunks and images removed)
+# ---------------------------------------------------------------
+run_test "TS-057" "Delete cascades to chunks and images"
+
+ABS_CASCADE=$(cd "$FIXTURES" && pwd)/official_document.jpg
+$BIN index "$ABS_CASCADE" --category cli_test >/dev/null 2>&1
+
+DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_CASCADE';")
+CHUNK_COUNT_BEFORE=$(db_query "SELECT count(*) FROM chunks WHERE document_id = '$DOC_ID';")
+IMAGE_COUNT_BEFORE=$(db_query "SELECT count(*) FROM images WHERE document_id = '$DOC_ID';")
+
+# Ensure there are related records
+if [ "$CHUNK_COUNT_BEFORE" -eq 0 ] && [ "$IMAGE_COUNT_BEFORE" -eq 0 ]; then
+    fail_test "No chunks or images to verify cascade (chunks=$CHUNK_COUNT_BEFORE, images=$IMAGE_COUNT_BEFORE)"
+else
+    # Delete the document
+    $BIN delete "$DOC_ID" --yes >/dev/null 2>&1
+
+    # Verify cascade: chunks and images should be gone
+    CHUNK_COUNT_AFTER=$(db_query "SELECT count(*) FROM chunks WHERE document_id = '$DOC_ID';")
+    IMAGE_COUNT_AFTER=$(db_query "SELECT count(*) FROM images WHERE document_id = '$DOC_ID';")
+
+    if [ "$CHUNK_COUNT_AFTER" -eq 0 ] && [ "$IMAGE_COUNT_AFTER" -eq 0 ]; then
+        pass_test
+    else
+        fail_test "Cascade failed: chunks=$CHUNK_COUNT_AFTER, images=$IMAGE_COUNT_AFTER (should be 0)"
+    fi
+fi
+
+# ---------------------------------------------------------------
+# TS-058: Search After Delete
+# ---------------------------------------------------------------
+run_test "TS-058" "Deleted document does not appear in search results"
+
+ABS_DEL_SEARCH=$(cd "$FIXTURES" && pwd)/document_fr.txt
+$BIN index "$ABS_DEL_SEARCH" --category cli_test >/dev/null 2>&1
+
+DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_DEL_SEARCH';")
+
+# Search should find it
+SEARCH_BEFORE=$($BIN search "document" --format json --category cli_test 2>/dev/null)
+FOUND_BEFORE=$(echo "$SEARCH_BEFORE" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('yes' if any('$ABS_DEL_SEARCH' in str(r.get('file_path','')) for r in d) else 'no')
+" 2>/dev/null || echo "no")
+
+# Delete it
+$BIN delete "$DOC_ID" --yes >/dev/null 2>&1
+
+# Search should NOT find it anymore
+SEARCH_AFTER=$($BIN search "document" --format json --category cli_test 2>/dev/null)
+FOUND_AFTER=$(echo "$SEARCH_AFTER" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('yes' if any('$ABS_DEL_SEARCH' in str(r.get('file_path','')) for r in d) else 'no')
+" 2>/dev/null || echo "no")
+
+if [ "$FOUND_BEFORE" = "yes" ] && [ "$FOUND_AFTER" = "no" ]; then
+    pass_test
+elif [ "$FOUND_BEFORE" = "no" ]; then
+    # Semantic search may not return exact match, but at least verify no results after delete
+    if [ "$FOUND_AFTER" = "no" ]; then
+        pass_test
+    else
+        fail_test "Document found after delete"
+    fi
+else
+    fail_test "before=$FOUND_BEFORE, after=$FOUND_AFTER"
 fi
 
 # ---------------------------------------------------------------

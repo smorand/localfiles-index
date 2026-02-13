@@ -20,13 +20,15 @@ make db-setup       # Create PostgreSQL database
 ```bash
 ./bin/localfiles-index-darwin-arm64 index <path> -c <category>       # category required; directories auto-recurse
 ./bin/localfiles-index-darwin-arm64 search <query> [-m semantic|fulltext] [-c category] [-f table|json|detail] [-l limit]
-./bin/localfiles-index-darwin-arm64 categories add|list|update|remove <name>
+./bin/localfiles-index-darwin-arm64 categories add|list|update|remove <name> [--description "..."]
 ./bin/localfiles-index-darwin-arm64 show <path|id> [--chunks]
 ./bin/localfiles-index-darwin-arm64 delete <path|id> [-y]
 ./bin/localfiles-index-darwin-arm64 update [path] [-f]
 ./bin/localfiles-index-darwin-arm64 status [-f table|json]
-./bin/localfiles-index-darwin-arm64 mcp [-p port] [--credentials path]
+./bin/localfiles-index-darwin-arm64 mcp [-p port] [--credentials path]  # default: ~/.credentials/scm-pwd-web.json
 ```
+
+**Global flags**: `--verbose` / `-v` enables debug-level logging.
 
 ## Project Structure
 
@@ -68,7 +70,7 @@ tests/
 - Go coding standards in `.agent_docs/golang.md`
 - Functional tests are bash scripts in `tests/test_*.sh`, exit 0=pass, 1=fail
 - All env config with sensible defaults (see `internal/config/config.go`)
-- Database: `postgresql://localfiles:localfiles@localhost:5432/localfiles`
+- Database: `postgresql://localfiles:localfiles@localhost:5432/localfiles?sslmode=disable`
 - API key: `GEMINI_API_KEY` env var required
 - PDF extraction: `pdf-extractor` binary (at `~/.local/bin/pdf-extractor`)
 
@@ -84,4 +86,3 @@ tests/
 ## Documentation Index
 - `.agent_docs/golang.md` - Go coding standards and conventions
 - `.agent_docs/makefile.md` - Makefile targets and usage documentation
-- `specifications.md` - Full project specifications with FR/TS references
