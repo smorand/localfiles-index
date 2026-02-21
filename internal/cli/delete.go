@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -20,23 +19,9 @@ var deleteCmd = &cobra.Command{
 		identifier := args[0]
 		yes, _ := cmd.Flags().GetBool("yes")
 
-		var docID uuid.UUID
-
-		// Try as UUID
-		id, parseErr := uuid.Parse(identifier)
-		if parseErr == nil {
-			_, err := store.GetDocumentByID(ctx, id)
-			if err != nil {
-				return fmt.Errorf("document not found: %s", identifier)
-			}
-			docID = id
-		} else {
-			// Try as file path
-			d, err := store.GetDocumentByPath(ctx, identifier)
-			if err != nil {
-				return fmt.Errorf("document not found: %s", identifier)
-			}
-			docID = d.ID
+		docID, err := resolveDocumentID(ctx, identifier)
+		if err != nil {
+			return err
 		}
 
 		if !yes {

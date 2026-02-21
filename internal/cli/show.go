@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -20,21 +19,9 @@ var showCmd = &cobra.Command{
 		identifier := args[0]
 		showChunks, _ := cmd.Flags().GetBool("chunks")
 
-		var docID uuid.UUID
-
-		id, parseErr := uuid.Parse(identifier)
-		if parseErr == nil {
-			_, err := store.GetDocumentByID(ctx, id)
-			if err != nil {
-				return fmt.Errorf("document not found: %s", identifier)
-			}
-			docID = id
-		} else {
-			d, err := store.GetDocumentByPath(ctx, identifier)
-			if err != nil {
-				return fmt.Errorf("document not found: %s", identifier)
-			}
-			docID = d.ID
+		docID, err := resolveDocumentID(ctx, identifier)
+		if err != nil {
+			return err
 		}
 
 		d, err := store.GetDocumentWithChunks(ctx, docID)

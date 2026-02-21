@@ -217,6 +217,28 @@ func (s *Store) GetDocumentByID(ctx context.Context, id uuid.UUID) (*Document, e
 	return doc, nil
 }
 
+// GetDocumentByIDPrefix returns a document matching a UUID prefix (minimum 8 chars).
+// Returns an error if the prefix matches zero or more than one document.
+func (s *Store) GetDocumentByIDPrefix(ctx context.Context, prefix string) (*Document, error) {
+	var docs []*Document
+	err := s.db.NewSelect().
+		Model(&docs).
+		Relation("Category").
+		Where("d.id::text LIKE ?", prefix+"%").
+		Limit(2).
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("searching document by id prefix: %w", err)
+	}
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("no document found with id prefix: %s", prefix)
+	}
+	if len(docs) > 1 {
+		return nil, fmt.Errorf("ambiguous id prefix %s: matches multiple documents", prefix)
+	}
+	return docs[0], nil
+}
+
 // GetDocumentWithChunks returns a document with all its chunks.
 func (s *Store) GetDocumentWithChunks(ctx context.Context, id uuid.UUID) (*Document, error) {
 	doc := new(Document)
