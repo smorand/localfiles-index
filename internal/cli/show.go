@@ -17,7 +17,7 @@ var showCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		identifier := args[0]
-		showChunks, _ := cmd.Flags().GetBool("chunks")
+		noChunks, _ := cmd.Flags().GetBool("no-chunks")
 
 		docID, err := resolveDocumentID(ctx, identifier)
 		if err != nil {
@@ -43,7 +43,7 @@ var showCmd = &cobra.Command{
 		fmt.Printf("  Chunks:   %d\n", len(d.Chunks))
 		fmt.Printf("  Images:   %d\n", len(d.Images))
 
-		if showChunks && len(d.Chunks) > 0 {
+		if !noChunks && len(d.Chunks) > 0 {
 			fmt.Println("\nChunks:")
 			for _, ch := range d.Chunks {
 				fmt.Printf("  [%d] type=%s", ch.ChunkIndex, ch.ChunkType)
@@ -63,6 +63,6 @@ var showCmd = &cobra.Command{
 }
 
 func init() {
-	showCmd.Flags().Bool("chunks", false, "Include chunk content in output")
+	showCmd.Flags().Bool("no-chunks", false, "Hide extracted content chunks")
 	rootCmd.AddCommand(showCmd)
 }

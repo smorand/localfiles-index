@@ -21,8 +21,8 @@ make db-setup       # Create PostgreSQL database
 ./bin/localfiles-index-darwin-arm64 index <path> -c <category>       # category required; directories auto-recurse
 ./bin/localfiles-index-darwin-arm64 search <query> [-m semantic|fulltext] [-c category] [-f table|json|detail] [-l limit]
 ./bin/localfiles-index-darwin-arm64 categories add|list|update|remove <name> [--description "..."]
-./bin/localfiles-index-darwin-arm64 show <path|id> [--chunks]
-./bin/localfiles-index-darwin-arm64 delete <path|id> [-y]
+./bin/localfiles-index-darwin-arm64 show <path|id> [--no-chunks]    # id supports short prefix (8+ hex chars)
+./bin/localfiles-index-darwin-arm64 delete <path|id> [-y]          # id supports short prefix (8+ hex chars)
 ./bin/localfiles-index-darwin-arm64 update [path] [-f]
 ./bin/localfiles-index-darwin-arm64 status [-f table|json]
 ./bin/localfiles-index-darwin-arm64 mcp [-p port] [--credentials path]  # default: ~/.credentials/scm-pwd-web.json
