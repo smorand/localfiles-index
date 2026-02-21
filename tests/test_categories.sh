@@ -18,7 +18,7 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('cat_test', 'cat_temp', 'cat_force', 'cat_migrate');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM categories WHERE name IN ('cat_test', 'cat_temp', 'cat_force', 'cat_migrate', 'testmixedcase');" >/dev/null 2>&1 || true
 }
 
 assert_eq() {
@@ -96,6 +96,34 @@ else
     # 3. Document should now be in cat_migrate
     CAT_NAME=$(db_query "SELECT c.name FROM documents d JOIN categories c ON c.id = d.category_id WHERE d.file_path = '$ABS_PATH';")
     assert_eq "document migrated to cat_migrate" "cat_migrate" "$CAT_NAME"
+
+    pass_test
+fi
+
+# ---------------------------------------------------------------
+# TS-043: Case-Insensitive Category Names
+# ---------------------------------------------------------------
+run_test "TS-043" "Categories are normalized to lowercase"
+
+# 1. Create with mixed case
+OUTPUT=$($BIN categories add TestMixedCase --description "Mixed case test" 2>/dev/null) && RC=0 || RC=$?
+assert_eq "create mixed case exit" "0" "$RC"
+
+# 2. Verify stored as lowercase
+STORED_NAME=$(db_query "SELECT name FROM categories WHERE name = 'testmixedcase';")
+if [ "$STORED_NAME" != "testmixedcase" ]; then
+    fail_test "Category not stored as lowercase (got '$STORED_NAME')"
+else
+    # 3. Look up with different casing
+    LOOKUP_OUTPUT=$($BIN categories update TESTMIXEDCASE --description "Updated via uppercase" 2>/dev/null) && RC=0 || RC=$?
+    assert_eq "update via uppercase exit" "0" "$RC"
+
+    DESC=$(db_query "SELECT description FROM categories WHERE name = 'testmixedcase';")
+    assert_eq "description updated via uppercase lookup" "Updated via uppercase" "$DESC"
+
+    # 4. Remove with different casing
+    $BIN categories remove TestMixedCase >/dev/null 2>&1 && RC=0 || RC=$?
+    assert_eq "remove via mixed case exit" "0" "$RC"
 
     pass_test
 fi

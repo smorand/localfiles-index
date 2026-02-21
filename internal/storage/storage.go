@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
@@ -72,7 +73,7 @@ func (s *Store) Close() error {
 // CreateCategory creates a new category.
 func (s *Store) CreateCategory(ctx context.Context, name, description string) (*Category, error) {
 	cat := &Category{
-		Name:        name,
+		Name:        strings.ToLower(name),
 		Description: description,
 	}
 
@@ -87,7 +88,7 @@ func (s *Store) CreateCategory(ctx context.Context, name, description string) (*
 // GetCategoryByName returns a category by name.
 func (s *Store) GetCategoryByName(ctx context.Context, name string) (*Category, error) {
 	cat := new(Category)
-	err := s.db.NewSelect().Model(cat).Where("name = ?", name).Scan(ctx)
+	err := s.db.NewSelect().Model(cat).Where("name = ?", strings.ToLower(name)).Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting category by name: %w", err)
 	}
@@ -110,7 +111,7 @@ func (s *Store) UpdateCategory(ctx context.Context, name, description string) (*
 	res, err := s.db.NewUpdate().
 		Model(cat).
 		Set("description = ?", description).
-		Where("name = ?", name).
+		Where("name = ?", strings.ToLower(name)).
 		Returning("*").
 		Exec(ctx)
 	if err != nil {
@@ -369,7 +370,7 @@ func (s *Store) SemanticSearch(ctx context.Context, queryEmbedding []float32, li
 		Limit(limit)
 
 	if categoryName != "" {
-		q = q.Where("c.name = ?", categoryName)
+		q = q.Where("c.name = ?", strings.ToLower(categoryName))
 	}
 
 	var results []*SearchResult
@@ -402,7 +403,7 @@ func (s *Store) FulltextSearch(ctx context.Context, query string, limit int, cat
 		Limit(limit)
 
 	if categoryName != "" {
-		q = q.Where("c.name = ?", categoryName)
+		q = q.Where("c.name = ?", strings.ToLower(categoryName))
 	}
 
 	var results []*SearchResult
