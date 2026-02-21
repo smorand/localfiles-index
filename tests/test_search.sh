@@ -45,18 +45,20 @@ echo "=== Lot 4: Search Tests ==="
 # ---------------------------------------------------------------
 # TS-023: Search on Empty Index
 # ---------------------------------------------------------------
-run_test "TS-023" "Search on empty index returns empty result"
+run_test "TS-023" "Search on empty category returns empty result"
 
-OUTPUT=$($BIN search "passport" --format json 2>/dev/null) && RC=0 || RC=$?
+# Use a dedicated empty category so real indexed documents don't interfere
+$BIN categories add search_test --description "Empty test category" >/dev/null 2>&1 || true
+OUTPUT=$($BIN search "passport" --category search_test --format json 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Search on empty index failed with non-zero exit"
+    fail_test "Search on empty category failed with non-zero exit"
 else
     if echo "$OUTPUT" | grep -q "No results found"; then
         pass_test
     else
         RESULT_COUNT=$(echo "$OUTPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
-        assert_eq "empty index result count" "0" "$RESULT_COUNT"
+        assert_eq "empty category result count" "0" "$RESULT_COUNT"
         pass_test
     fi
 fi
@@ -78,7 +80,7 @@ $BIN index "$ABS_PDF" --category travail >/dev/null 2>&1
 # ---------------------------------------------------------------
 run_test "TS-009" "Semantic search for passport"
 
-OUTPUT=$($BIN search "passport Sebastien Morand" --format json 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN search "passport Sebastien Morand" --category administratif --format json 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Semantic search failed"

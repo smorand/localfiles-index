@@ -80,8 +80,8 @@ func formatResults(results []*storage.SearchResult, format string) error {
 
 func formatTable(results []*storage.SearchResult) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "TITLE\tPATH\tTYPE\tCATEGORY\tSCORE\tPAGE")
-	fmt.Fprintln(w, "-----\t----\t----\t--------\t-----\t----")
+	fmt.Fprintln(w, "ID\tTITLE\tPATH\tTYPE\tCATEGORY\tSCORE\tPAGE")
+	fmt.Fprintln(w, "--\t-----\t----\t----\t--------\t-----\t----")
 
 	for _, r := range results {
 		page := ""
@@ -94,7 +94,8 @@ func formatTable(results []*storage.SearchResult) error {
 		}
 		title := truncate(r.Title, maxTitleDisplayLen)
 		path := truncate(r.FilePath, maxPathDisplayLen)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.4f\t%s\n", title, path, r.DocumentType, cat, r.Similarity, page)
+		id := r.DocumentID.String()[:8]
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.4f\t%s\n", id, title, path, r.DocumentType, cat, r.Similarity, page)
 	}
 	return w.Flush()
 }
@@ -114,6 +115,7 @@ func formatDetail(results []*storage.SearchResult) error {
 			fmt.Println(strings.Repeat("─", 60))
 		}
 		fmt.Printf("Result %d:\n", i+1)
+		fmt.Printf("  ID:       %s\n", r.DocumentID)
 		fmt.Printf("  Title:    %s\n", r.Title)
 		fmt.Printf("  Path:     %s\n", r.FilePath)
 		fmt.Printf("  Type:     %s\n", r.DocumentType)
