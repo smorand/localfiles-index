@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/genai"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 const (
@@ -18,28 +19,26 @@ const (
 	maxTitleInputLen = 10000
 	// maxSummaryInputLen is the maximum character length of text sent for summary/analysis.
 	maxSummaryInputLen = 15000
+
+	openRouterBaseURL = "https://openrouter.ai/api/v1"
 )
 
-// Analyzer performs AI-based content analysis using Gemini.
+// Analyzer performs AI-based content analysis using OpenRouter.
 type Analyzer struct {
-	client *genai.Client
+	client *openai.Client
 	model  string
 }
 
-// New creates a new Analyzer.
-func New(ctx context.Context, apiKey string, model string) (*Analyzer, error) {
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating Gemini client: %w", err)
-	}
+// New creates a new Analyzer configured for OpenRouter.
+func New(apiKey string, model string) *Analyzer {
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = openRouterBaseURL
+	client := openai.NewClientWithConfig(cfg)
 
 	return &Analyzer{
 		client: client,
 		model:  model,
-	}, nil
+	}
 }
 
 // ImageAnalysisResult holds the result of analyzing an image.
@@ -73,25 +72,32 @@ type SpreadsheetResult struct {
 
 const maxRetries = 5
 
-// generateContent wraps GenerateContent with retry logic for rate limiting.
-func (a *Analyzer) generateContent(ctx context.Context, content []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+// chatCompletion wraps CreateChatCompletion with retry logic for rate limiting.
+func (a *Analyzer) chatCompletion(ctx context.Context, messages []openai.ChatCompletionMessage, temperature float32) (string, error) {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		result, err := a.client.Models.GenerateContent(ctx, a.model, content, config)
+		resp, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+			Model:       a.model,
+			Messages:    messages,
+			Temperature: temperature,
+		})
 		if err == nil {
-			return result, nil
+			if len(resp.Choices) == 0 {
+				return "", fmt.Errorf("no choices in response")
+			}
+			return resp.Choices[0].Message.Content, nil
 		}
 		if !isRetryableError(err) || attempt == maxRetries {
-			return nil, err
+			return "", err
 		}
 		delay := time.Duration(1<<attempt) * time.Second
-		slog.Warn("Gemini API rate limited, retrying", "attempt", attempt+1, "delay", delay)
+		slog.Warn("OpenRouter API rate limited, retrying", "attempt", attempt+1, "delay", delay)
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return "", ctx.Err()
 		case <-time.After(delay):
 		}
 	}
-	return nil, fmt.Errorf("unreachable")
+	return "", fmt.Errorf("unreachable")
 }
 
 func isRetryableError(err error) bool {
@@ -107,6 +113,10 @@ func (a *Analyzer) AnalyzeImage(ctx context.Context, imagePath string) (*ImageAn
 	if err != nil {
 		return nil, fmt.Errorf("reading image file: %w", err)
 	}
+
+	mimeType := detectImageMimeType(imagePath)
+	b64 := base64.StdEncoding.EncodeToString(imageData)
+	dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
 
 	prompt := `Analyze this image and return a JSON response with the following structure:
 {
@@ -127,23 +137,30 @@ Rules for segments:
 
 Return ONLY valid JSON, no markdown formatting.`
 
-	mimeType := detectImageMimeType(imagePath)
-
-	result, err := a.generateContent(ctx, []*genai.Content{
+	messages := []openai.ChatCompletionMessage{
 		{
-			Parts: []*genai.Part{
-				genai.NewPartFromBytes(imageData, mimeType),
-				genai.NewPartFromText(prompt),
+			Role: openai.ChatMessageRoleUser,
+			MultiContent: []openai.ChatMessagePart{
+				{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL:    dataURI,
+						Detail: openai.ImageURLDetailAuto,
+					},
+				},
+				{
+					Type: openai.ChatMessagePartTypeText,
+					Text: prompt,
+				},
 			},
 		},
-	}, &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.1)),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("Gemini API error: %w", err)
 	}
 
-	text := extractText(result)
+	text, err := a.chatCompletion(ctx, messages, 0.1)
+	if err != nil {
+		return nil, fmt.Errorf("OpenRouter API error: %w", err)
+	}
+
 	slog.Debug("image analysis response", "text", text)
 
 	var analysisResult ImageAnalysisResult
@@ -158,7 +175,6 @@ Return ONLY valid JSON, no markdown formatting.`
 func (a *Analyzer) GenerateTitle(ctx context.Context, text string) (*TitleResult, error) {
 	slog.Debug("generating title", "text_length", len(text))
 
-	// Truncate text if too long
 	truncated := text
 	if len(truncated) > maxTitleInputLen {
 		truncated = truncated[:maxTitleInputLen]
@@ -170,16 +186,12 @@ func (a *Analyzer) GenerateTitle(ctx context.Context, text string) (*TitleResult
 Content:
 %s`, truncated)
 
-	result, err := a.generateContent(ctx, []*genai.Content{
-		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
-	}, &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.1)),
-	})
+	respText, err := a.chatCompletion(ctx, []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: prompt},
+	}, 0.1)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini API error: %w", err)
+		return nil, fmt.Errorf("OpenRouter API error: %w", err)
 	}
-
-	respText := extractText(result)
 
 	var titleResult TitleResult
 	if err := json.Unmarshal([]byte(cleanJSON(respText)), &titleResult); err != nil {
@@ -203,16 +215,14 @@ func (a *Analyzer) GenerateSummary(ctx context.Context, text string) (string, er
 Content:
 %s`, truncated)
 
-	result, err := a.generateContent(ctx, []*genai.Content{
-		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
-	}, &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.3)),
-	})
+	respText, err := a.chatCompletion(ctx, []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: prompt},
+	}, 0.3)
 	if err != nil {
-		return "", fmt.Errorf("Gemini API error: %w", err)
+		return "", fmt.Errorf("OpenRouter API error: %w", err)
 	}
 
-	return extractText(result), nil
+	return respText, nil
 }
 
 // DescribeSpreadsheet analyzes spreadsheet content.
@@ -235,16 +245,12 @@ func (a *Analyzer) DescribeSpreadsheet(ctx context.Context, content string) (*Sp
 Content:
 %s`, truncated)
 
-	result, err := a.generateContent(ctx, []*genai.Content{
-		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
-	}, &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.1)),
-	})
+	respText, err := a.chatCompletion(ctx, []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: prompt},
+	}, 0.1)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini API error: %w", err)
+		return nil, fmt.Errorf("OpenRouter API error: %w", err)
 	}
-
-	respText := extractText(result)
 
 	var spreadsheetResult SpreadsheetResult
 	if err := json.Unmarshal([]byte(cleanJSON(respText)), &spreadsheetResult); err != nil {
@@ -285,16 +291,13 @@ For each tag, evaluate whether the document matches the tag's rule. Return ONLY 
 
 Return ONLY valid JSON, no markdown formatting.`, title, truncateStr(description, maxSummaryInputLen), tagList.String())
 
-	result, err := a.generateContent(ctx, []*genai.Content{
-		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
-	}, &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.1)),
-	})
+	respText, err := a.chatCompletion(ctx, []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleUser, Content: prompt},
+	}, 0.1)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini API error: %w", err)
+		return nil, fmt.Errorf("OpenRouter API error: %w", err)
 	}
 
-	respText := extractText(result)
 	slog.Debug("tag suggestion response", "text", respText)
 
 	var suggested []string
@@ -310,18 +313,6 @@ func truncateStr(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s
-}
-
-// extractText extracts the text content from a Gemini response.
-func extractText(result *genai.GenerateContentResponse) string {
-	if result == nil || len(result.Candidates) == 0 {
-		return ""
-	}
-	candidate := result.Candidates[0]
-	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return ""
-	}
-	return candidate.Content.Parts[0].Text
 }
 
 // cleanJSON removes markdown code fences from JSON responses.
