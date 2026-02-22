@@ -55,7 +55,7 @@ internal/
     tools.go                     # MCP tool definitions
     oauth.go                     # OAuth 2.1 client credentials
 tests/
-  run_tests.sh                   # Test runner (finds test_*.sh)
+  run_tests.sh                   # Test runner (ordered by API usage, retries failures)
   test_index.sh                  # Image indexing tests (Lot 2)
   test_text_pdf.sh               # PDF/text/spreadsheet tests (Lot 3)
   test_search.sh                 # Search tests (Lot 4)
@@ -76,6 +76,7 @@ tests/
 - Tags: many-to-many via `document_tags` junction table; auto-created during indexing
 - Auto-tagging: tags with non-empty `rule` field are evaluated by LLM during indexing
 - Search tag filtering uses AND logic (results must have ALL specified tags)
+- Embeddings use batch API calls (all chunks in one request) for rate limit efficiency
 
 ## Maintenance Rules
 - Whenever you modify code, maintain specifications consistency and always update documentation (README.md and CLAUDE.md if relevant)
