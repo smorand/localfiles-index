@@ -37,3 +37,4 @@ coverage.html
 
 # Credentials
 *.json.bak
+.worktrees/
