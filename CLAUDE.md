@@ -1,9 +1,9 @@
 # LocalFiles Index
 
 ## Overview
-Personal file indexing and semantic search system. Indexes local files (images, PDFs, text, spreadsheets) using Gemini AI and enables natural language retrieval via CLI, REST JSON API (`/api`), and MCP JSON-RPC API (`/mcp`).
+Personal file indexing and semantic search system. Indexes local files (images, PDFs, text, spreadsheets) using AI and enables natural language retrieval via CLI, REST JSON API (`/api`), and MCP JSON-RPC API (`/mcp`).
 
-**Tech stack**: Go 1.25, PostgreSQL + pgvector, Gemini AI (Flash + embedding-001), Cobra CLI, Fiber HTTP, Bun ORM
+**Tech stack**: Go 1.25, PostgreSQL + pgvector, OpenRouter (inference) + Gemini (embeddings), Cobra CLI, Fiber HTTP, Bun ORM
 
 ## Key Commands
 
@@ -46,7 +46,7 @@ internal/
     detector.go                  # File type detection
     chunker.go                   # Text chunking (100 words, 5 overlap)
     pdfparser.go                 # pdf-extractor JSON output parser
-  analyzer/analyzer.go           # Gemini AI analysis + SuggestTags
+  analyzer/analyzer.go           # OpenRouter AI analysis + SuggestTags
   embedding/embedding.go         # Gemini embedding generation
   searcher/searcher.go           # Semantic + fulltext search
   mcp/                           # MCP HTTP Streamable server + REST API
@@ -71,12 +71,13 @@ tests/
 - Functional tests are bash scripts in `tests/test_*.sh`, exit 0=pass, 1=fail
 - All env config with sensible defaults (see `internal/config/config.go`)
 - Database: `postgresql://localfiles:localfiles@localhost:5432/localfiles?sslmode=disable`
-- API key: `GEMINI_API_KEY` env var required
+- API keys: `OPENROUTER_API_KEY` (inference) + `GEMINI_API_KEY` (embeddings) env vars required
 - PDF extraction: `pdf-extractor` binary (at `~/.local/bin/pdf-extractor`)
 - Tags: many-to-many via `document_tags` junction table; auto-created during indexing
 - Auto-tagging: tags with non-empty `rule` field are evaluated by LLM during indexing
 - Search tag filtering uses AND logic (results must have ALL specified tags)
-- Embeddings use batch API calls (all chunks in one request) for rate limit efficiency
+- Inference uses OpenRouter (OpenAI-compatible API) via `github.com/sashabaranov/go-openai`
+- Embeddings use Gemini API batch calls (all chunks in one request) for rate limit efficiency
 
 ## Maintenance Rules
 - Whenever you modify code, maintain specifications consistency and always update documentation (README.md and CLAUDE.md if relevant)
