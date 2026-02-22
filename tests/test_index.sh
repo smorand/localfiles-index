@@ -42,7 +42,7 @@ index_with_retry() {
     local path="$1"; shift
     for attempt in 1 2 3; do
         OUTPUT=$($BIN index "$path" "$@" 2>/dev/null) && return 0
-        sleep $((attempt * 10))
+        sleep $((attempt * 3))
     done
     return 1
 }

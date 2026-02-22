@@ -49,7 +49,7 @@ index_with_retry() {
         if $BIN index "$path" --tags "$tags" >/dev/null 2>&1; then
             return 0
         fi
-        sleep $((attempt * 10))
+        sleep $((attempt * 3))
     done
     echo "WARN: indexing $path failed after 3 attempts" >&2
     return 1
@@ -618,9 +618,6 @@ fi
 # ---------------------------------------------------------------
 run_test "TS-058" "MCP update tool"
 
-# Cooldown before update tests (rate limit recovery)
-sleep 15
-
 # Index a file first
 ABS_UPDATE=$(cd "$FIXTURES" && pwd)/sample_text.txt
 index_with_retry "$ABS_UPDATE" mcp_test
@@ -643,9 +640,6 @@ fi
 # TS-059: REST API PUT /api/documents/:id (single document update)
 # ---------------------------------------------------------------
 run_test "TS-059" "REST API update single document by ID"
-
-# Cooldown before REST update test (rate limit recovery)
-sleep 15
 
 # Ensure a doc is indexed
 api_post "/api/tags" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1 || true

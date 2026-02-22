@@ -75,15 +75,15 @@ for test_name in "${TEST_ORDER[@]}"; do
         FAILED_TESTS+=("$test_file")
     fi
 
-    # Pause between test suites to let Gemini API rate limits reset (per-minute window)
-    sleep 20
+    # Brief pause between test suites (app has internal retry with exponential backoff)
+    sleep 3
 done
 
 # Retry failed tests once (API rate limits are often transient)
 if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo ""
     echo "Retrying ${#FAILED_TESTS[@]} failed test(s) after cooldown..."
-    sleep 90
+    sleep 20
 
     for test_file in "${FAILED_TESTS[@]}"; do
         test_name=$(basename "$test_file" .sh)
@@ -100,7 +100,7 @@ if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
             ERRORS="$ERRORS\n--- $test_name ---\n$output\n"
         fi
 
-        sleep 30
+        sleep 5
     done
 fi
 

@@ -35,7 +35,7 @@ index_with_retry() {
     local path="$1"; shift
     for attempt in 1 2 3; do
         if $BIN index "$path" "$@" >/dev/null 2>&1; then return 0; fi
-        sleep $((attempt * 10))
+        sleep $((attempt * 3))
     done
     echo "WARN: indexing $path failed after 3 attempts" >&2
     return 1

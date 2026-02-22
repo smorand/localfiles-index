@@ -43,13 +43,13 @@ fail_test() { echo "FAIL: $1"; ERRORS=$((ERRORS + 1)); }
 # Index with retry (handles Gemini API rate limits)
 index_with_retry() {
     local path="$1" tags="$2"
-    for attempt in 1 2 3 4; do
+    for attempt in 1 2 3; do
         if $BIN index "$path" --tags "$tags" >/dev/null 2>&1; then
             return 0
         fi
-        sleep $((attempt * 15))
+        sleep $((attempt * 5))
     done
-    echo "WARN: indexing $path failed after 4 attempts" >&2
+    echo "WARN: indexing $path failed after 3 attempts" >&2
     return 1
 }
 
@@ -88,8 +88,8 @@ index_with_retry "$ABS_OFFICIAL" administratif || { echo "FAIL: Setup indexing f
 index_with_retry "$ABS_TEXT" travail || { echo "FAIL: Setup indexing failed"; exit 1; }
 index_with_retry "$ABS_PDF" travail || { echo "FAIL: Setup indexing failed"; exit 1; }
 
-# Brief cooldown after setup indexing to let rate limits recover
-sleep 10
+# Brief cooldown after setup indexing
+sleep 2
 
 # ---------------------------------------------------------------
 # TS-009: Semantic Search Returns Relevant Results
@@ -100,7 +100,7 @@ run_test "TS-009" "Semantic search for passport"
 for _attempt in 1 2 3; do
     OUTPUT=$($BIN search "passport Sebastien Morand" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
     [ $RC -eq 0 ] && break
-    sleep $((_attempt * 10))
+    sleep $((_attempt * 3))
 done
 
 if [ $RC -ne 0 ]; then
@@ -172,7 +172,7 @@ run_test "TS-011" "Tag-filtered search"
 for _attempt in 1 2 3; do
     OUTPUT=$($BIN search "document" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
     [ $RC -eq 0 ] && break
-    sleep $((_attempt * 10))
+    sleep $((_attempt * 3))
 done
 
 if [ $RC -ne 0 ]; then
