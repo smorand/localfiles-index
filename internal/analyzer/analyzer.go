@@ -121,7 +121,7 @@ func (a *Analyzer) AnalyzeImage(ctx context.Context, imagePath string) (*ImageAn
 	prompt := `Analyze this image and return a JSON response with the following structure:
 {
   "content_type": "<type of content: official_document, photograph, diagram, chart, screenshot, illustration, etc.>",
-  "title": "<descriptive title for this image>",
+  "title": "<descriptive title including key identifiers such as person name, document number, or subject>",
   "confidence": <confidence score 0.0 to 1.0 for the title>,
   "description": "<full description of the image>",
   "segments": [
