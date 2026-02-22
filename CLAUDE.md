@@ -23,7 +23,7 @@ make db-setup       # Create PostgreSQL database
 ./bin/localfiles-index-darwin-arm64 tags add|list|update|remove|merge <name> [--description "..."] [--rule "..."]
 ./bin/localfiles-index-darwin-arm64 show <path|id> [--no-chunks]    # id supports short prefix (8+ hex chars)
 ./bin/localfiles-index-darwin-arm64 delete <path|id> [-y]          # id supports short prefix (8+ hex chars)
-./bin/localfiles-index-darwin-arm64 update [path] [-f]
+./bin/localfiles-index-darwin-arm64 update [path|dir] [-f]  # dir scopes to docs under that directory
 ./bin/localfiles-index-darwin-arm64 status [-f table|json]
 ./bin/localfiles-index-darwin-arm64 mcp [-p port] [--credentials path]  # default: ~/.credentials/scm-pwd-web.json
 ```

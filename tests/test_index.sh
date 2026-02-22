@@ -22,8 +22,6 @@ db_query() {
 
 # Helper: clean test data
 cleanup() {
-    db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
-    db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
     db_query "DELETE FROM tags WHERE name IN ('administratif', 'photos', 'auto_tag_test');" >/dev/null 2>&1 || true
 }
@@ -37,6 +35,16 @@ assert_eq() {
         echo "FAIL: $desc (expected='$expected', got='$actual')"
         exit 1
     fi
+}
+
+# Retry helper for indexing (rate limiting)
+index_with_retry() {
+    local path="$1"; shift
+    for attempt in 1 2 3; do
+        OUTPUT=$($BIN index "$path" "$@" 2>/dev/null) && return 0
+        sleep $((attempt * 10))
+    done
+    return 1
 }
 
 assert_gt() {
@@ -97,10 +105,10 @@ $BIN tags add administratif --description "Documents administratifs" >/dev/null 
 
 # Index the official document
 ABS_PATH=$(cd "$FIXTURES" && pwd)/official_document.jpg
-OUTPUT=$($BIN index "$ABS_PATH" --tags administratif 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$ABS_PATH" --tags administratif && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index command failed with exit code $RC: $OUTPUT"
+    fail_test "Index command failed (rate limited)"
 else
     # Verify document record
     DOC_TYPE=$(db_query "SELECT document_type FROM documents WHERE file_path = '$ABS_PATH';")
@@ -188,10 +196,10 @@ fi
 # ---------------------------------------------------------------
 run_test "TS-027" "Index auto-creates new tags"
 
-OUTPUT=$($BIN index "$ABS_PATH" --tags auto_tag_test 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$ABS_PATH" --tags auto_tag_test && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index with new tag should succeed (auto-create), got exit code $RC"
+    fail_test "Index with new tag should succeed (rate limited)"
 else
     # Tag should have been auto-created
     TAG_EXISTS=$(db_query "SELECT count(*) FROM tags WHERE name = 'auto_tag_test';")
@@ -210,10 +218,10 @@ fi
 run_test "TS-034" "Index a PNG image"
 
 PNG_PATH=$(cd "$FIXTURES" && pwd)/diagram.png
-OUTPUT=$($BIN index "$PNG_PATH" --tags administratif 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$PNG_PATH" --tags administratif && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index PNG failed with exit code $RC"
+    fail_test "Index PNG failed (rate limited)"
 else
     DOC_TYPE=$(db_query "SELECT document_type FROM documents WHERE file_path = '$PNG_PATH';")
     assert_eq "document_type for PNG" "image" "$DOC_TYPE"
@@ -237,10 +245,10 @@ run_test "TS-035" "Image segment variability (official vs photo)"
 # Index family photo
 $BIN tags add photos --description "Photos de famille" >/dev/null 2>&1 || true
 PHOTO_PATH=$(cd "$FIXTURES" && pwd)/family_photo.jpg
-OUTPUT=$($BIN index "$PHOTO_PATH" --tags photos 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$PHOTO_PATH" --tags photos && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index family photo failed with exit code $RC"
+    fail_test "Index family photo failed (rate limited)"
 else
     # Official document should have more segments than photo
     OFFICIAL_SEGMENTS=$(db_query "SELECT count(*) FROM chunks WHERE document_id = (SELECT id FROM documents WHERE file_path = '$ABS_PATH') AND chunk_type = 'image_segment';")

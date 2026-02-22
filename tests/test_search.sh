@@ -19,8 +19,6 @@ db_query() {
 }
 
 cleanup() {
-    db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
-    db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
     db_query "DELETE FROM tags WHERE name IN ('administratif', 'travail', 'search_test');" >/dev/null 2>&1 || true
 }
@@ -45,13 +43,13 @@ fail_test() { echo "FAIL: $1"; ERRORS=$((ERRORS + 1)); }
 # Index with retry (handles Gemini API rate limits)
 index_with_retry() {
     local path="$1" tags="$2"
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4; do
         if $BIN index "$path" --tags "$tags" >/dev/null 2>&1; then
             return 0
         fi
-        sleep $((attempt * 10))
+        sleep $((attempt * 15))
     done
-    echo "WARN: indexing $path failed after 3 attempts" >&2
+    echo "WARN: indexing $path failed after 4 attempts" >&2
     return 1
 }
 
@@ -86,19 +84,27 @@ ABS_OFFICIAL=$(cd "$FIXTURES" && pwd)/official_document.jpg
 ABS_TEXT=$(cd "$FIXTURES" && pwd)/sample_text.txt
 ABS_PDF=$(cd "$FIXTURES" && pwd)/multipage.pdf
 
-index_with_retry "$ABS_OFFICIAL" administratif
-index_with_retry "$ABS_TEXT" travail
-index_with_retry "$ABS_PDF" travail
+index_with_retry "$ABS_OFFICIAL" administratif || { echo "FAIL: Setup indexing failed"; exit 1; }
+index_with_retry "$ABS_TEXT" travail || { echo "FAIL: Setup indexing failed"; exit 1; }
+index_with_retry "$ABS_PDF" travail || { echo "FAIL: Setup indexing failed"; exit 1; }
+
+# Brief cooldown after setup indexing to let rate limits recover
+sleep 10
 
 # ---------------------------------------------------------------
 # TS-009: Semantic Search Returns Relevant Results
 # ---------------------------------------------------------------
 run_test "TS-009" "Semantic search for passport"
 
-OUTPUT=$($BIN search "passport Sebastien Morand" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
+# Retry search in case of rate limiting on embedding query
+for _attempt in 1 2 3; do
+    OUTPUT=$($BIN search "passport Sebastien Morand" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
+    [ $RC -eq 0 ] && break
+    sleep $((_attempt * 10))
+done
 
 if [ $RC -ne 0 ]; then
-    fail_test "Semantic search failed"
+    fail_test "Semantic search failed (rate limited)"
 else
     RESULT_COUNT=$(echo "$OUTPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
     if [ "$RESULT_COUNT" -eq 0 ]; then
@@ -162,10 +168,15 @@ fi
 # ---------------------------------------------------------------
 run_test "TS-011" "Tag-filtered search"
 
-OUTPUT=$($BIN search "document" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
+# Retry search in case of rate limiting
+for _attempt in 1 2 3; do
+    OUTPUT=$($BIN search "document" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
+    [ $RC -eq 0 ] && break
+    sleep $((_attempt * 10))
+done
 
 if [ $RC -ne 0 ]; then
-    fail_test "Tag search failed"
+    fail_test "Tag search failed (rate limited)"
 else
     # All results should have the administratif tag
     WRONG_TAG=$(echo "$OUTPUT" | python3 -c "

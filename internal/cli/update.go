@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -34,12 +36,26 @@ var updateCmd = &cobra.Command{
 		idx := indexer.New(store, anlz, emb, cfg)
 
 		if len(args) == 1 {
-			// Update specific file
-			return updateSingleFile(ctx, idx, args[0], force)
+			path := args[0]
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				return fmt.Errorf("resolving path: %w", err)
+			}
+
+			info, err := os.Stat(absPath)
+			if err != nil {
+				// Path doesn't exist on disk — try as indexed file path
+				return updateSingleFile(ctx, idx, absPath, force)
+			}
+
+			if info.IsDir() {
+				return updateAllDocuments(ctx, idx, force, absPath)
+			}
+			return updateSingleFile(ctx, idx, absPath, force)
 		}
 
 		// Update all documents
-		return updateAllDocuments(ctx, idx, force)
+		return updateAllDocuments(ctx, idx, force, "")
 	},
 }
 
@@ -78,7 +94,7 @@ func updateSingleFile(ctx context.Context, idx *indexer.Indexer, path string, fo
 	return nil
 }
 
-func updateAllDocuments(ctx context.Context, idx *indexer.Indexer, force bool) error {
+func updateAllDocuments(ctx context.Context, idx *indexer.Indexer, force bool, dirPrefix string) error {
 	docs, err := store.ListDocuments(ctx)
 	if err != nil {
 		return fmt.Errorf("listing documents: %w", err)
@@ -87,6 +103,10 @@ func updateAllDocuments(ctx context.Context, idx *indexer.Indexer, force bool) e
 	var updated, unchanged, missing int
 
 	for _, doc := range docs {
+		if dirPrefix != "" && !strings.HasPrefix(doc.FilePath, dirPrefix+"/") {
+			continue
+		}
+
 		stat, err := os.Stat(doc.FilePath)
 		if err != nil {
 			slog.Warn("file missing from disk", "path", doc.FilePath)

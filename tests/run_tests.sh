@@ -6,11 +6,29 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DB_URL="postgresql://localfiles:localfiles@localhost:5432/localfiles?sslmode=disable"
 PASS=0
 FAIL=0
 SKIP=0
 ERRORS=""
 FAILED_TESTS=()
+
+# Temporarily disable auto-tag rules to reduce Gemini API calls during tests.
+# This prevents personal tag rules from triggering LLM calls on every index operation.
+SAVED_RULES=$(psql "$DB_URL" -t -A -c "SELECT name || '|' || rule FROM tags WHERE rule != '';" 2>/dev/null || true)
+if [ -n "$SAVED_RULES" ]; then
+    psql "$DB_URL" -c "UPDATE tags SET rule = '' WHERE rule != '';" >/dev/null 2>&1 || true
+fi
+
+restore_rules() {
+    if [ -n "$SAVED_RULES" ]; then
+        while IFS='|' read -r name rule; do
+            [ -z "$name" ] && continue
+            psql "$DB_URL" -c "UPDATE tags SET rule = \$\$${rule}\$\$ WHERE name = '${name}';" >/dev/null 2>&1 || true
+        done <<< "$SAVED_RULES"
+    fi
+}
+trap restore_rules EXIT
 
 # Colors
 GREEN='\033[0;32m'
@@ -65,7 +83,7 @@ done
 if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo ""
     echo "Retrying ${#FAILED_TESTS[@]} failed test(s) after cooldown..."
-    sleep 45
+    sleep 90
 
     for test_file in "${FAILED_TESTS[@]}"; do
         test_name=$(basename "$test_file" .sh)
@@ -82,7 +100,7 @@ if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
             ERRORS="$ERRORS\n--- $test_name ---\n$output\n"
         fi
 
-        sleep 15
+        sleep 30
     done
 fi
 

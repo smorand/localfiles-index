@@ -27,8 +27,6 @@ cleanup() {
         kill "$MCP_PID" 2>/dev/null || true
         wait "$MCP_PID" 2>/dev/null || true
     fi
-    db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%');" >/dev/null 2>&1 || true
-    db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%';" >/dev/null 2>&1 || true
     db_query "DELETE FROM tags WHERE name IN ('mcp_test', 'admin', 'work', 'api_test_tag', 'api_doc_test');" >/dev/null 2>&1 || true
     rm -rf /tmp/mcp-test-* 2>/dev/null || true
@@ -511,8 +509,14 @@ run_test "TS-056c" "REST API document operations"
 # Ensure tag exists
 api_post "/api/tags" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1
 
-# Index a file
+# Clean up any existing document (from earlier test cases) to avoid stale state
 ABS_TXT_API=$(cd "$FIXTURES" && pwd)/sample_text.txt
+EXISTING_DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_TXT_API';" 2>/dev/null || true)
+if [ -n "$EXISTING_DOC_ID" ]; then
+    api_delete "/api/documents/$EXISTING_DOC_ID" >/dev/null 2>&1 || true
+fi
+
+# Index a file
 INDEX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_API\",\"tags\":[\"api_doc_test\"]}")
 DOC_ID=$(echo "$INDEX_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('document_id',''))" 2>/dev/null)
 
@@ -614,9 +618,12 @@ fi
 # ---------------------------------------------------------------
 run_test "TS-058" "MCP update tool"
 
+# Cooldown before update tests (rate limit recovery)
+sleep 15
+
 # Index a file first
 ABS_UPDATE=$(cd "$FIXTURES" && pwd)/sample_text.txt
-$BIN index "$ABS_UPDATE" --tags mcp_test >/dev/null 2>&1 || true
+index_with_retry "$ABS_UPDATE" mcp_test
 
 # Call update via MCP (single file path, no force)
 UPDATE_RESP=$(mcp_tool_call "update" "{\"path\":\"$ABS_UPDATE\",\"force\":false}" "$TOKEN" | parse_result)
@@ -636,6 +643,9 @@ fi
 # TS-059: REST API PUT /api/documents/:id (single document update)
 # ---------------------------------------------------------------
 run_test "TS-059" "REST API update single document by ID"
+
+# Cooldown before REST update test (rate limit recovery)
+sleep 15
 
 # Ensure a doc is indexed
 api_post "/api/tags" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1 || true

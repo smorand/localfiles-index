@@ -2,7 +2,9 @@ package indexer
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -72,7 +74,13 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, tagNames []s
 
 	// Check if document already exists
 	existingDoc, err := idx.store.GetDocumentByPath(ctx, absPath)
-	if err == nil && existingDoc != nil {
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("checking existing document: %w", err)
+		}
+		existingDoc = nil // Not found — will create below
+	}
+	if existingDoc != nil {
 		// Document exists — re-index: delete old chunks/images
 		slog.Info("document already exists, re-indexing", "id", existingDoc.ID)
 		if err := idx.store.DeleteDocumentImages(ctx, existingDoc.ID); err != nil {

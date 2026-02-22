@@ -19,8 +19,6 @@ db_query() {
 }
 
 cleanup() {
-    db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%');" >/dev/null 2>&1 || true
-    db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/%';" >/dev/null 2>&1 || true
     db_query "DELETE FROM tags WHERE name IN ('cli_test', 'cli_test2');" >/dev/null 2>&1 || true
     rm -rf "$SCRIPT_DIR/fixtures/test_dir" 2>/dev/null || true
@@ -33,6 +31,17 @@ assert_eq() {
 }
 assert_ge() {
     if [ "$3" -lt "$2" ] 2>/dev/null; then echo "FAIL: $1 (expected >= $2, got '$3')"; exit 1; fi
+}
+
+# Retry helper for indexing (rate limiting)
+index_with_retry() {
+    local path="$1"; shift
+    for attempt in 1 2 3; do
+        if $BIN index "$path" "$@" >/dev/null 2>&1; then return 0; fi
+        sleep $((attempt * 10))
+    done
+    echo "WARN: indexing $path failed after 3 attempts" >&2
+    return 1
 }
 
 cleanup
@@ -56,7 +65,7 @@ assert_eq "create tag" "0" "$RC"
 
 # 2. Index file
 ABS_IMG=$(cd "$FIXTURES" && pwd)/official_document.jpg
-$BIN index "$ABS_IMG" --tags cli_test >/dev/null 2>&1 && RC=0 || RC=$?
+index_with_retry "$ABS_IMG" --tags cli_test && RC=0 || RC=$?
 assert_eq "index file" "0" "$RC"
 
 # 3. Search
@@ -134,8 +143,8 @@ fi
 run_test "TS-024" "Duplicate file indexing (re-index same file)"
 
 ABS_TXT=$(cd "$FIXTURES" && pwd)/sample_text.txt
-$BIN index "$ABS_TXT" --tags cli_test >/dev/null 2>&1
-$BIN index "$ABS_TXT" --tags cli_test >/dev/null 2>&1
+index_with_retry "$ABS_TXT" --tags cli_test
+index_with_retry "$ABS_TXT" --tags cli_test
 
 DOC_COUNT=$(db_query "SELECT count(*) FROM documents WHERE file_path = '$ABS_TXT';")
 assert_eq "no duplicate docs" "1" "$DOC_COUNT"
@@ -309,7 +318,7 @@ fi
 run_test "TS-057" "Delete cascades to chunks and images"
 
 ABS_CASCADE=$(cd "$FIXTURES" && pwd)/official_document.jpg
-$BIN index "$ABS_CASCADE" --tags cli_test >/dev/null 2>&1
+index_with_retry "$ABS_CASCADE" --tags cli_test
 
 DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_CASCADE';")
 CHUNK_COUNT_BEFORE=$(db_query "SELECT count(*) FROM chunks WHERE document_id = '$DOC_ID';")
@@ -339,7 +348,7 @@ fi
 run_test "TS-058" "Deleted document does not appear in search results"
 
 ABS_DEL_SEARCH=$(cd "$FIXTURES" && pwd)/document_fr.txt
-$BIN index "$ABS_DEL_SEARCH" --tags cli_test >/dev/null 2>&1
+index_with_retry "$ABS_DEL_SEARCH" --tags cli_test
 
 DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_DEL_SEARCH';")
 

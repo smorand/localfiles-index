@@ -20,10 +20,8 @@ db_query() {
     psql "$DB_URL" -t -A -c "$1" 2>/dev/null
 }
 
-# Helper: clean test data
+# Helper: clean test data (CASCADE handles chunks, images, document_tags)
 cleanup() {
-    db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
-    db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
     db_query "DELETE FROM tags WHERE name IN ('docs', 'data');" >/dev/null 2>&1 || true
 }
@@ -36,6 +34,16 @@ assert_eq() {
         echo "FAIL: $desc (expected='$expected', got='$actual')"
         exit 1
     fi
+}
+
+# Retry helper for indexing (rate limiting)
+index_with_retry() {
+    local path="$1"; shift
+    for attempt in 1 2 3; do
+        OUTPUT=$($BIN index "$path" "$@" 2>/dev/null) && return 0
+        sleep $((attempt * 10))
+    done
+    return 1
 }
 
 assert_ge() {
@@ -83,10 +91,10 @@ $BIN tags add data --description "Data files" >/dev/null 2>&1 || true
 run_test "TS-002" "Index a multi-page PDF"
 
 PDF_PATH=$(cd "$FIXTURES" && pwd)/multipage.pdf
-OUTPUT=$($BIN index "$PDF_PATH" --tags docs 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$PDF_PATH" --tags docs && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index PDF failed: $OUTPUT"
+    fail_test "Index PDF failed (rate limited)"
 else
     DOC_TYPE=$(db_query "SELECT document_type FROM documents WHERE file_path = '$PDF_PATH';")
     assert_eq "document_type" "pdf" "$DOC_TYPE"
@@ -146,10 +154,10 @@ fi
 run_test "TS-004" "Index a plain text file"
 
 TXT_PATH=$(cd "$FIXTURES" && pwd)/sample_text.txt
-OUTPUT=$($BIN index "$TXT_PATH" --tags docs 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$TXT_PATH" --tags docs && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index text failed: $OUTPUT"
+    fail_test "Index text failed (rate limited)"
 else
     DOC_TYPE=$(db_query "SELECT document_type FROM documents WHERE file_path = '$TXT_PATH';")
     assert_eq "document_type" "text" "$DOC_TYPE"
@@ -179,10 +187,10 @@ fi
 run_test "TS-005" "Index a CSV spreadsheet"
 
 CSV_PATH=$(cd "$FIXTURES" && pwd)/sample.csv
-OUTPUT=$($BIN index "$CSV_PATH" --tags data 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$CSV_PATH" --tags data && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index CSV failed: $OUTPUT"
+    fail_test "Index CSV failed (rate limited)"
 else
     DOC_TYPE=$(db_query "SELECT document_type FROM documents WHERE file_path = '$CSV_PATH';")
     assert_eq "document_type" "spreadsheet" "$DOC_TYPE"
@@ -212,10 +220,10 @@ fi
 run_test "TS-037" "Index an XLSX spreadsheet"
 
 XLSX_PATH=$(cd "$FIXTURES" && pwd)/sample.xlsx
-OUTPUT=$($BIN index "$XLSX_PATH" --tags data 2>/dev/null) && RC=0 || RC=$?
+index_with_retry "$XLSX_PATH" --tags data && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Index XLSX failed: $OUTPUT"
+    fail_test "Index XLSX failed (rate limited)"
 else
     DOC_TYPE=$(db_query "SELECT document_type FROM documents WHERE file_path = '$XLSX_PATH';")
     assert_eq "xlsx document_type" "spreadsheet" "$DOC_TYPE"

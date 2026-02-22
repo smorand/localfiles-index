@@ -15,8 +15,6 @@ db_query() {
 }
 
 cleanup() {
-    db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
-    db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
     db_query "DELETE FROM tags WHERE name IN ('tag_test', 'tag_temp', 'tag_force', 'tag_merge_src', 'tag_merge_dst', 'testmixedcase', 'tag_rule');" >/dev/null 2>&1 || true
 }
