@@ -59,16 +59,17 @@ func updateSingleFile(ctx context.Context, idx *indexer.Indexer, path string, fo
 		return nil
 	}
 
-	// Determine category name by loading document with relations
-	categoryName := ""
-	if doc.CategoryID != nil {
-		d, err := store.GetDocumentWithChunks(ctx, doc.ID)
-		if err == nil && d.Category != nil {
-			categoryName = d.Category.Name
-		}
+	// Preserve existing tags
+	tags, err := store.GetDocumentTags(ctx, doc.ID)
+	if err != nil {
+		return fmt.Errorf("getting document tags: %w", err)
+	}
+	var tagNames []string
+	for _, t := range tags {
+		tagNames = append(tagNames, t.Name)
 	}
 
-	_, err = idx.IndexFile(ctx, path, categoryName)
+	_, err = idx.IndexFile(ctx, path, tagNames)
 	if err != nil {
 		return fmt.Errorf("re-indexing: %w", err)
 	}
@@ -98,13 +99,13 @@ func updateAllDocuments(ctx context.Context, idx *indexer.Indexer, force bool) e
 			continue
 		}
 
-		// Determine category name
-		categoryName := ""
-		if doc.Category != nil {
-			categoryName = doc.Category.Name
+		// Preserve existing tags
+		var tagNames []string
+		for _, t := range doc.Tags {
+			tagNames = append(tagNames, t.Name)
 		}
 
-		_, err = idx.IndexFile(ctx, doc.FilePath, categoryName)
+		_, err = idx.IndexFile(ctx, doc.FilePath, tagNames)
 		if err != nil {
 			slog.Error("failed to re-index", "path", doc.FilePath, "error", err)
 			continue

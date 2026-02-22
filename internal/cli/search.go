@@ -33,15 +33,17 @@ var searchCmd = &cobra.Command{
 		query := args[0]
 
 		mode, _ := cmd.Flags().GetString("mode")
-		category, _ := cmd.Flags().GetString("category")
+		tagsStr, _ := cmd.Flags().GetString("tags")
 		limit, _ := cmd.Flags().GetInt("limit")
 		format, _ := cmd.Flags().GetString("format")
 
-		// Validate category exists if specified
-		if category != "" {
-			_, err := store.GetCategoryByName(ctx, category)
+		tags := splitTags(tagsStr)
+
+		// Validate each tag exists if specified
+		for _, t := range tags {
+			_, err := store.GetTagByName(ctx, t)
 			if err != nil {
-				return fmt.Errorf("category not found: %s", category)
+				return fmt.Errorf("tag not found: %s", t)
 			}
 		}
 
@@ -51,7 +53,7 @@ var searchCmd = &cobra.Command{
 		}
 
 		srch := searcher.New(store, emb)
-		results, err := srch.Search(ctx, query, mode, category, limit)
+		results, err := srch.Search(ctx, query, mode, tags, limit)
 		if err != nil {
 			return err
 		}
@@ -80,22 +82,22 @@ func formatResults(results []*storage.SearchResult, format string) error {
 
 func formatTable(results []*storage.SearchResult) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tTITLE\tPATH\tTYPE\tCATEGORY\tSCORE\tPAGE")
-	fmt.Fprintln(w, "--\t-----\t----\t----\t--------\t-----\t----")
+	fmt.Fprintln(w, "ID\tTITLE\tPATH\tTYPE\tTAGS\tSCORE\tPAGE")
+	fmt.Fprintln(w, "--\t-----\t----\t----\t----\t-----\t----")
 
 	for _, r := range results {
 		page := ""
 		if r.SourcePage != nil {
 			page = fmt.Sprintf("%d", *r.SourcePage)
 		}
-		cat := r.CategoryName
-		if cat == "" {
-			cat = "-"
+		tagNames := r.TagNames
+		if tagNames == "" {
+			tagNames = "-"
 		}
 		title := truncate(r.Title, maxTitleDisplayLen)
 		path := truncate(r.FilePath, maxPathDisplayLen)
 		id := r.DocumentID.String()[:8]
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.4f\t%s\n", id, title, path, r.DocumentType, cat, r.Similarity, page)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.4f\t%s\n", id, title, path, r.DocumentType, tagNames, r.Similarity, page)
 	}
 	return w.Flush()
 }
@@ -119,7 +121,7 @@ func formatDetail(results []*storage.SearchResult) error {
 		fmt.Printf("  Title:    %s\n", r.Title)
 		fmt.Printf("  Path:     %s\n", r.FilePath)
 		fmt.Printf("  Type:     %s\n", r.DocumentType)
-		fmt.Printf("  Category: %s\n", r.CategoryName)
+		fmt.Printf("  Tags:     %s\n", r.TagNames)
 		fmt.Printf("  Score:    %.4f\n", r.Similarity)
 		fmt.Printf("  Segment:  %s", r.ChunkType)
 		if r.ChunkLabel != "" {
@@ -143,7 +145,7 @@ func truncate(s string, maxLen int) string {
 
 func init() {
 	searchCmd.Flags().StringP("mode", "m", "semantic", "Search mode: semantic or fulltext")
-	searchCmd.Flags().StringP("category", "c", "", "Filter by category")
+	searchCmd.Flags().StringP("tags", "t", "", "Filter by tags (comma-separated, AND logic)")
 	searchCmd.Flags().IntP("limit", "l", 10, "Max results")
 	searchCmd.Flags().StringP("format", "f", "table", "Output format: table, json, detail")
 	rootCmd.AddCommand(searchCmd)

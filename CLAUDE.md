@@ -18,9 +18,9 @@ make db-setup       # Create PostgreSQL database
 ## Binary Usage
 
 ```bash
-./bin/localfiles-index-darwin-arm64 index <path> -c <category>       # category required; directories auto-recurse
-./bin/localfiles-index-darwin-arm64 search <query> [-m semantic|fulltext] [-c category] [-f table|json|detail] [-l limit]
-./bin/localfiles-index-darwin-arm64 categories add|list|update|remove <name> [--description "..."]
+./bin/localfiles-index-darwin-arm64 index <path> [-t tag1,tag2]       # tags optional; auto-tagging runs; directories auto-recurse
+./bin/localfiles-index-darwin-arm64 search <query> [-m semantic|fulltext] [-t tag1,tag2] [-f table|json|detail] [-l limit]
+./bin/localfiles-index-darwin-arm64 tags add|list|update|remove|merge <name> [--description "..."] [--rule "..."]
 ./bin/localfiles-index-darwin-arm64 show <path|id> [--no-chunks]    # id supports short prefix (8+ hex chars)
 ./bin/localfiles-index-darwin-arm64 delete <path|id> [-y]          # id supports short prefix (8+ hex chars)
 ./bin/localfiles-index-darwin-arm64 update [path] [-f]
@@ -38,15 +38,15 @@ internal/
   cli/                           # Cobra CLI subcommands
   config/config.go               # Env-based configuration
   storage/                       # Bun ORM models + DB operations
-    models.go                    # Category, Document, Chunk, Image
+    models.go                    # Tag, DocumentTag, Document, Chunk, Image
     storage.go                   # CRUD, search, stats queries
-    migrations/                  # Auto-run schema migrations
+    migrations/                  # Auto-run schema migrations (001_initial, 002_tags)
   indexer/                       # File indexing pipeline
-    indexer.go                   # Orchestrator (image/pdf/text/spreadsheet/doc)
+    indexer.go                   # Orchestrator (image/pdf/text/spreadsheet/doc) + auto-tagging
     detector.go                  # File type detection
     chunker.go                   # Text chunking (100 words, 5 overlap)
     pdfparser.go                 # pdf-extractor JSON output parser
-  analyzer/analyzer.go           # Gemini AI analysis
+  analyzer/analyzer.go           # Gemini AI analysis + SuggestTags
   embedding/embedding.go         # Gemini embedding generation
   searcher/searcher.go           # Semantic + fulltext search
   mcp/                           # MCP HTTP Streamable server + REST API
@@ -59,7 +59,7 @@ tests/
   test_index.sh                  # Image indexing tests (Lot 2)
   test_text_pdf.sh               # PDF/text/spreadsheet tests (Lot 3)
   test_search.sh                 # Search tests (Lot 4)
-  test_categories.sh             # Category CRUD tests (Lot 5)
+  test_tags.sh                   # Tag CRUD + merge + rules tests (Lot 5)
   test_cli_workflow.sh           # Full CLI workflow tests (Lot 5)
   test_update.sh                 # Update & conversion tests (Lot 6)
   test_mcp.sh                    # MCP HTTP server + REST API tests (Lot 7)
@@ -73,6 +73,9 @@ tests/
 - Database: `postgresql://localfiles:localfiles@localhost:5432/localfiles?sslmode=disable`
 - API key: `GEMINI_API_KEY` env var required
 - PDF extraction: `pdf-extractor` binary (at `~/.local/bin/pdf-extractor`)
+- Tags: many-to-many via `document_tags` junction table; auto-created during indexing
+- Auto-tagging: tags with non-empty `rule` field are evaluated by LLM during indexing
+- Search tag filtering uses AND logic (results must have ALL specified tags)
 
 ## Maintenance Rules
 - Whenever you modify code, maintain specifications consistency and always update documentation (README.md and CLAUDE.md if relevant)

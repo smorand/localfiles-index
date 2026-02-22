@@ -44,10 +44,11 @@ type IndexResult struct {
 	Title      string
 	ChunkCount int
 	ImageCount int
+	Tags       []string
 }
 
 // IndexFile indexes a single file.
-func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName string) (*IndexResult, error) {
+func (idx *Indexer) IndexFile(ctx context.Context, filePath string, tagNames []string) (*IndexResult, error) {
 	// Resolve absolute path
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
@@ -68,16 +69,6 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName
 		return nil, fmt.Errorf("stat file: %w", err)
 	}
 	mtime := stat.ModTime()
-
-	// Check category if specified
-	var categoryID *uuid.UUID
-	if categoryName != "" {
-		cat, err := idx.store.GetCategoryByName(ctx, categoryName)
-		if err != nil {
-			return nil, fmt.Errorf("category not found: %s", categoryName)
-		}
-		categoryID = &cat.ID
-	}
 
 	// Check if document already exists
 	existingDoc, err := idx.store.GetDocumentByPath(ctx, absPath)
@@ -130,7 +121,6 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName
 		existingDoc.Title = title
 		existingDoc.TitleConfidence = titleConfidence
 		existingDoc.DocumentType = docType
-		existingDoc.CategoryID = categoryID
 		existingDoc.MimeType = fileInfo.MimeType
 		existingDoc.FileSize = fileInfo.Size
 		existingDoc.IndexedAt = time.Now()
@@ -147,7 +137,6 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName
 			Title:           title,
 			TitleConfidence: titleConfidence,
 			DocumentType:    docType,
-			CategoryID:      categoryID,
 			MimeType:        fileInfo.MimeType,
 			FileSize:        fileInfo.Size,
 			Metadata:        "{}",
@@ -159,17 +148,20 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName
 		docID = doc.ID
 	}
 
-	// Set document ID on all chunks and generate embeddings
+	// Set document ID on all chunks and generate embeddings (batch)
+	var texts []string
 	for _, chunk := range chunks {
 		chunk.DocumentID = docID
+		texts = append(texts, chunk.Content)
+	}
 
-		// Generate embedding
-		emb, err := idx.embedder.EmbedDocument(ctx, chunk.Content)
-		if err != nil {
-			slog.Warn("failed to generate embedding", "error", err, "chunk_index", chunk.ChunkIndex)
-			continue
+	embeddings, err := idx.embedder.EmbedDocuments(ctx, texts)
+	if err != nil {
+		slog.Warn("failed to generate batch embeddings", "error", err)
+	} else {
+		for i, emb := range embeddings {
+			chunks[i].Embedding = emb
 		}
-		chunk.Embedding = emb
 	}
 
 	// Bulk insert chunks
@@ -189,12 +181,31 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName
 		}
 	}
 
+	// Auto-tagging: load all tags with non-empty rules and ask LLM
+	allTags := make([]string, len(tagNames))
+	copy(allTags, tagNames)
+
+	autoTags, err := idx.autoTag(ctx, title, chunks)
+	if err != nil {
+		slog.Warn("auto-tagging failed, continuing with manual tags only", "error", err)
+	} else {
+		allTags = mergeUnique(allTags, autoTags)
+	}
+
+	// Set tags on document
+	if len(allTags) > 0 {
+		if err := idx.store.SetDocumentTags(ctx, docID, allTags); err != nil {
+			return nil, fmt.Errorf("setting document tags: %w", err)
+		}
+	}
+
 	slog.Info("file indexed successfully",
 		"path", absPath,
 		"document_id", docID,
 		"title", title,
 		"chunks", len(chunks),
 		"images", len(images),
+		"tags", allTags,
 	)
 
 	return &IndexResult{
@@ -202,7 +213,67 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, categoryName
 		Title:      title,
 		ChunkCount: len(chunks),
 		ImageCount: len(images),
+		Tags:       allTags,
 	}, nil
+}
+
+// autoTag loads tag rules and suggests tags using the LLM.
+func (idx *Indexer) autoTag(ctx context.Context, title string, chunks []*storage.Chunk) ([]string, error) {
+	tags, err := idx.store.ListTags(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing tags: %w", err)
+	}
+
+	var rules []analyzer.TagRule
+	for _, t := range tags {
+		if t.Rule != "" {
+			rules = append(rules, analyzer.TagRule{Name: t.Name, Rule: t.Rule})
+		}
+	}
+
+	if len(rules) == 0 {
+		return nil, nil
+	}
+
+	// Build a description from first chunks
+	var desc strings.Builder
+	for _, ch := range chunks {
+		if ch.ChunkType == "doc_summary" || ch.ChunkType == "doc_title" || ch.ChunkType == "image_segment" {
+			desc.WriteString(ch.Content)
+			desc.WriteString("\n")
+		}
+		if desc.Len() > 2000 {
+			break
+		}
+	}
+
+	suggested, err := idx.analyzer.SuggestTags(ctx, title, desc.String(), rules)
+	if err != nil {
+		return nil, err
+	}
+
+	return suggested, nil
+}
+
+// mergeUnique merges two string slices, returning unique lowercase values.
+func mergeUnique(a, b []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, s := range a {
+		lower := strings.ToLower(s)
+		if !seen[lower] {
+			seen[lower] = true
+			result = append(result, lower)
+		}
+	}
+	for _, s := range b {
+		lower := strings.ToLower(s)
+		if !seen[lower] {
+			seen[lower] = true
+			result = append(result, lower)
+		}
+	}
+	return result
 }
 
 func (idx *Indexer) indexImage(ctx context.Context, path string) (string, float64, []*storage.Chunk, []*storage.Image, error) {

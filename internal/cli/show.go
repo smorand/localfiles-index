@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -35,8 +36,12 @@ var showCmd = &cobra.Command{
 		fmt.Printf("  Type:     %s\n", d.DocumentType)
 		fmt.Printf("  MIME:     %s\n", d.MimeType)
 		fmt.Printf("  Size:     %d bytes\n", d.FileSize)
-		if d.Category != nil {
-			fmt.Printf("  Category: %s\n", d.Category.Name)
+		if len(d.Tags) > 0 {
+			var tagNames []string
+			for _, t := range d.Tags {
+				tagNames = append(tagNames, t.Name)
+			}
+			fmt.Printf("  Tags:     %s\n", strings.Join(tagNames, ", "))
 		}
 		fmt.Printf("  Title Confidence: %.2f\n", d.TitleConfidence)
 		fmt.Printf("  Indexed:  %s\n", d.IndexedAt.Format("2006-01-02 15:04:05"))

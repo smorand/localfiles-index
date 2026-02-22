@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -70,6 +71,34 @@ type SpreadsheetResult struct {
 	Description string  `json:"description"`
 }
 
+const maxRetries = 5
+
+// generateContent wraps GenerateContent with retry logic for rate limiting.
+func (a *Analyzer) generateContent(ctx context.Context, content []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		result, err := a.client.Models.GenerateContent(ctx, a.model, content, config)
+		if err == nil {
+			return result, nil
+		}
+		if !isRetryableError(err) || attempt == maxRetries {
+			return nil, err
+		}
+		delay := time.Duration(1<<attempt) * time.Second
+		slog.Warn("Gemini API rate limited, retrying", "attempt", attempt+1, "delay", delay)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return nil, fmt.Errorf("unreachable")
+}
+
+func isRetryableError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "429") || strings.Contains(s, "RESOURCE_EXHAUSTED") || strings.Contains(s, "503")
+}
+
 // AnalyzeImage analyzes an image file and returns structured segments.
 func (a *Analyzer) AnalyzeImage(ctx context.Context, imagePath string) (*ImageAnalysisResult, error) {
 	slog.Debug("analyzing image", "path", imagePath)
@@ -100,7 +129,7 @@ Return ONLY valid JSON, no markdown formatting.`
 
 	mimeType := detectImageMimeType(imagePath)
 
-	result, err := a.client.Models.GenerateContent(ctx, a.model, []*genai.Content{
+	result, err := a.generateContent(ctx, []*genai.Content{
 		{
 			Parts: []*genai.Part{
 				genai.NewPartFromBytes(imageData, mimeType),
@@ -141,7 +170,7 @@ func (a *Analyzer) GenerateTitle(ctx context.Context, text string) (*TitleResult
 Content:
 %s`, truncated)
 
-	result, err := a.client.Models.GenerateContent(ctx, a.model, []*genai.Content{
+	result, err := a.generateContent(ctx, []*genai.Content{
 		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
 	}, &genai.GenerateContentConfig{
 		Temperature: genai.Ptr(float32(0.1)),
@@ -174,7 +203,7 @@ func (a *Analyzer) GenerateSummary(ctx context.Context, text string) (string, er
 Content:
 %s`, truncated)
 
-	result, err := a.client.Models.GenerateContent(ctx, a.model, []*genai.Content{
+	result, err := a.generateContent(ctx, []*genai.Content{
 		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
 	}, &genai.GenerateContentConfig{
 		Temperature: genai.Ptr(float32(0.3)),
@@ -206,7 +235,7 @@ func (a *Analyzer) DescribeSpreadsheet(ctx context.Context, content string) (*Sp
 Content:
 %s`, truncated)
 
-	result, err := a.client.Models.GenerateContent(ctx, a.model, []*genai.Content{
+	result, err := a.generateContent(ctx, []*genai.Content{
 		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
 	}, &genai.GenerateContentConfig{
 		Temperature: genai.Ptr(float32(0.1)),
@@ -223,6 +252,64 @@ Content:
 	}
 
 	return &spreadsheetResult, nil
+}
+
+// TagRule holds a tag name and its associated auto-tagging prompt.
+type TagRule struct {
+	Name string
+	Rule string
+}
+
+// SuggestTags asks the LLM which tags apply to a document based on tag rules.
+// Only tags with non-empty rules are evaluated. Returns matching tag names.
+func (a *Analyzer) SuggestTags(ctx context.Context, title string, description string, tags []TagRule) ([]string, error) {
+	if len(tags) == 0 {
+		return nil, nil
+	}
+
+	slog.Debug("suggesting tags", "title", title, "tag_count", len(tags))
+
+	var tagList strings.Builder
+	for _, t := range tags {
+		fmt.Fprintf(&tagList, "- %s: %s\n", t.Name, t.Rule)
+	}
+
+	prompt := fmt.Sprintf(`You are a document classifier. Given a document's title and description, determine which tags apply.
+
+Document title: %s
+Document description: %s
+
+Available tags and their rules:
+%s
+For each tag, evaluate whether the document matches the tag's rule. Return ONLY a JSON array of matching tag names. If no tags match, return an empty array [].
+
+Return ONLY valid JSON, no markdown formatting.`, title, truncateStr(description, maxSummaryInputLen), tagList.String())
+
+	result, err := a.generateContent(ctx, []*genai.Content{
+		{Parts: []*genai.Part{genai.NewPartFromText(prompt)}},
+	}, &genai.GenerateContentConfig{
+		Temperature: genai.Ptr(float32(0.1)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Gemini API error: %w", err)
+	}
+
+	respText := extractText(result)
+	slog.Debug("tag suggestion response", "text", respText)
+
+	var suggested []string
+	if err := json.Unmarshal([]byte(cleanJSON(respText)), &suggested); err != nil {
+		return nil, fmt.Errorf("parsing tag suggestion response: %w\nraw: %s", err, respText)
+	}
+
+	return suggested, nil
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen]
+	}
+	return s
 }
 
 // extractText extracts the text content from a Gemini response.

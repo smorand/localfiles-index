@@ -25,8 +25,10 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('administratif', 'photos', 'test_nonexist_cat');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM tags WHERE name IN ('administratif', 'photos', 'auto_tag_test');" >/dev/null 2>&1 || true
 }
+
+trap cleanup EXIT
 
 # Helper: assert
 assert_eq() {
@@ -88,14 +90,14 @@ echo "=== Lot 2: Core Image Indexing Tests ==="
 # ---------------------------------------------------------------
 # TS-001: Index an Image File (JPEG official document)
 # ---------------------------------------------------------------
-run_test "TS-001" "Index a JPEG image (official document) with category"
+run_test "TS-001" "Index a JPEG image (official document) with tag"
 
-# Create category first
-$BIN categories add administratif --description "Documents administratifs" >/dev/null 2>&1
+# Create tag first
+$BIN tags add administratif --description "Documents administratifs" >/dev/null 2>&1
 
 # Index the official document
 ABS_PATH=$(cd "$FIXTURES" && pwd)/official_document.jpg
-OUTPUT=$($BIN index "$ABS_PATH" --category administratif 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_PATH" --tags administratif 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index command failed with exit code $RC: $OUTPUT"
@@ -132,9 +134,9 @@ else
         IMG_DESC=$(db_query "SELECT length(description) > 0 FROM images WHERE document_id = (SELECT id FROM documents WHERE file_path = '$ABS_PATH') LIMIT 1;")
         assert_eq "image has description" "t" "$IMG_DESC"
 
-        # Verify category
-        CAT=$(db_query "SELECT c.name FROM documents d JOIN categories c ON c.id = d.category_id WHERE d.file_path = '$ABS_PATH';")
-        assert_eq "category" "administratif" "$CAT"
+        # Verify tag via document_tags
+        TAG=$(db_query "SELECT t.name FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = (SELECT id FROM documents WHERE file_path = '$ABS_PATH') AND t.name = 'administratif';")
+        assert_eq "tag" "administratif" "$TAG"
 
         # Verify mtime is stored
         MTIME=$(db_query "SELECT file_mtime IS NOT NULL FROM documents WHERE file_path = '$ABS_PATH';")
@@ -170,7 +172,7 @@ fi
 run_test "TS-025" "Reject corrupt image file"
 
 CORRUPT_PATH=$(cd "$FIXTURES" && pwd)/corrupt_image.jpg
-OUTPUT=$($BIN index "$CORRUPT_PATH" --category administratif 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$CORRUPT_PATH" --tags administratif 2>&1) && RC=0 || RC=$?
 
 if [ $RC -eq 0 ]; then
     fail_test "Expected failure for corrupt image, got exit code 0"
@@ -182,21 +184,24 @@ else
 fi
 
 # ---------------------------------------------------------------
-# TS-027: Index with Non-Existent Category
+# TS-027: Index with Auto-Created Tag
 # ---------------------------------------------------------------
-run_test "TS-027" "Reject non-existent category"
+run_test "TS-027" "Index auto-creates new tags"
 
-OUTPUT=$($BIN index "$ABS_PATH" --category nonexistent_category_xyz 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_PATH" --tags auto_tag_test 2>/dev/null) && RC=0 || RC=$?
 
-if [ $RC -eq 0 ]; then
-    fail_test "Expected failure for non-existent category, got exit code 0"
+if [ $RC -ne 0 ]; then
+    fail_test "Index with new tag should succeed (auto-create), got exit code $RC"
 else
-    # Should contain error about category
-    if echo "$OUTPUT" | grep -qi "category"; then
-        pass_test
-    else
-        fail_test "Error message should mention 'category': $OUTPUT"
-    fi
+    # Tag should have been auto-created
+    TAG_EXISTS=$(db_query "SELECT count(*) FROM tags WHERE name = 'auto_tag_test';")
+    assert_eq "auto-created tag exists" "1" "$TAG_EXISTS"
+
+    # Document should have the tag
+    HAS_TAG=$(db_query "SELECT count(*) FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = (SELECT id FROM documents WHERE file_path = '$ABS_PATH') AND t.name = 'auto_tag_test';")
+    assert_ge "document has auto-created tag" "1" "$HAS_TAG"
+
+    pass_test
 fi
 
 # ---------------------------------------------------------------
@@ -205,7 +210,7 @@ fi
 run_test "TS-034" "Index a PNG image"
 
 PNG_PATH=$(cd "$FIXTURES" && pwd)/diagram.png
-OUTPUT=$($BIN index "$PNG_PATH" --category administratif 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$PNG_PATH" --tags administratif 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index PNG failed with exit code $RC"
@@ -230,9 +235,9 @@ fi
 run_test "TS-035" "Image segment variability (official vs photo)"
 
 # Index family photo
-$BIN categories add photos --description "Photos de famille" >/dev/null 2>&1 || true
+$BIN tags add photos --description "Photos de famille" >/dev/null 2>&1 || true
 PHOTO_PATH=$(cd "$FIXTURES" && pwd)/family_photo.jpg
-OUTPUT=$($BIN index "$PHOTO_PATH" --category photos 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$PHOTO_PATH" --tags photos 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index family photo failed with exit code $RC"

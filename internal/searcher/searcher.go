@@ -23,24 +23,24 @@ func New(store *storage.Store, embedder *embedding.Embedder) *Searcher {
 }
 
 // Search performs a search based on mode.
-func (s *Searcher) Search(ctx context.Context, query string, mode string, category string, limit int) ([]*storage.SearchResult, error) {
+func (s *Searcher) Search(ctx context.Context, query string, mode string, tags []string, limit int) ([]*storage.SearchResult, error) {
 	switch mode {
 	case "semantic", "":
-		return s.semanticSearch(ctx, query, category, limit)
+		return s.semanticSearch(ctx, query, tags, limit)
 	case "fulltext":
-		return s.fulltextSearch(ctx, query, category, limit)
+		return s.fulltextSearch(ctx, query, tags, limit)
 	default:
 		return nil, fmt.Errorf("unsupported search mode: %s", mode)
 	}
 }
 
-func (s *Searcher) semanticSearch(ctx context.Context, query string, category string, limit int) ([]*storage.SearchResult, error) {
+func (s *Searcher) semanticSearch(ctx context.Context, query string, tags []string, limit int) ([]*storage.SearchResult, error) {
 	queryEmbedding, err := s.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("generating query embedding: %w", err)
 	}
 
-	results, err := s.store.SemanticSearch(ctx, queryEmbedding, limit, category)
+	results, err := s.store.SemanticSearch(ctx, queryEmbedding, limit, tags)
 	if err != nil {
 		return nil, fmt.Errorf("semantic search: %w", err)
 	}
@@ -48,8 +48,8 @@ func (s *Searcher) semanticSearch(ctx context.Context, query string, category st
 	return results, nil
 }
 
-func (s *Searcher) fulltextSearch(ctx context.Context, query string, category string, limit int) ([]*storage.SearchResult, error) {
-	results, err := s.store.FulltextSearch(ctx, query, limit, category)
+func (s *Searcher) fulltextSearch(ctx context.Context, query string, tags []string, limit int) ([]*storage.SearchResult, error) {
+	results, err := s.store.FulltextSearch(ctx, query, limit, tags)
 	if err != nil {
 		return nil, fmt.Errorf("fulltext search: %w", err)
 	}

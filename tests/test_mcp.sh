@@ -30,7 +30,7 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/mcp-test-%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('mcp_test', 'admin', 'work', 'api_test_cat', 'api_doc_test');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM tags WHERE name IN ('mcp_test', 'admin', 'work', 'api_test_tag', 'api_doc_test');" >/dev/null 2>&1 || true
     rm -rf /tmp/mcp-test-* 2>/dev/null || true
 }
 
@@ -43,6 +43,19 @@ PASS=0
 run_test() { echo -n "  $1: $2... "; }
 pass_test() { echo "OK"; PASS=$((PASS + 1)); }
 fail_test() { echo "FAIL: $1"; ERRORS=$((ERRORS + 1)); }
+
+# Index with retry (handles Gemini API rate limits)
+index_with_retry() {
+    local path="$1" tags="$2"
+    for attempt in 1 2 3; do
+        if $BIN index "$path" --tags "$tags" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep $((attempt * 10))
+    done
+    echo "WARN: indexing $path failed after 3 attempts" >&2
+    return 1
+}
 
 echo "=== Lot 7: MCP HTTP Server Tests ==="
 
@@ -207,9 +220,9 @@ TOKEN=$(get_token)
 run_test "TS-016" "MCP search tool"
 
 # Pre-index a document first via CLI
-$BIN categories add mcp_test --description "MCP test" >/dev/null 2>&1 || true
+$BIN tags add mcp_test --description "MCP test" >/dev/null 2>&1 || true
 ABS_IMG=$(cd "$FIXTURES" && pwd)/official_document.jpg
-$BIN index "$ABS_IMG" --category mcp_test >/dev/null 2>&1
+index_with_retry "$ABS_IMG" mcp_test
 
 # Search via MCP
 SEARCH_RESP=$(mcp_tool_call "search" '{"query":"passport document"}' "$TOKEN" | parse_result)
@@ -241,7 +254,7 @@ fi
 run_test "TS-017" "MCP index tool"
 
 ABS_TXT=$(cd "$FIXTURES" && pwd)/sample_text.txt
-INDEX_RESP=$(mcp_tool_call "index_file" "{\"path\":\"$ABS_TXT\",\"category\":\"mcp_test\"}" "$TOKEN" | parse_result)
+INDEX_RESP=$(mcp_tool_call "index_file" "{\"path\":\"$ABS_TXT\",\"tags\":[\"mcp_test\"]}" "$TOKEN" | parse_result)
 IS_ERROR=$(echo "$INDEX_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
 if [ "$IS_ERROR" = "True" ]; then
@@ -273,14 +286,14 @@ fi
 # ---------------------------------------------------------------
 # TS-046: MCP Full Workflow
 # ---------------------------------------------------------------
-run_test "TS-046" "MCP full workflow (list categories, index, search, get_document, status, delete)"
+run_test "TS-046" "MCP full workflow (list tags, index, search, get_document, status, delete)"
 
-# 1. List categories
-CATS=$(mcp_tool_call "list_categories" '{}' "$TOKEN" | parse_result)
+# 1. List tags
+TAGS=$(mcp_tool_call "list_tags" '{}' "$TOKEN" | parse_result)
 
 # 2. Index file (already done above, use PDF)
 ABS_PDF=$(cd "$FIXTURES" && pwd)/multipage.pdf
-INDEX_RESP=$(mcp_tool_call "index_file" "{\"path\":\"$ABS_PDF\",\"category\":\"mcp_test\"}" "$TOKEN" | parse_result)
+INDEX_RESP=$(mcp_tool_call "index_file" "{\"path\":\"$ABS_PDF\",\"tags\":[\"mcp_test\"]}" "$TOKEN" | parse_result)
 
 # 3. Search
 SEARCH_RESP=$(mcp_tool_call "search" '{"query":"machine learning neural networks"}' "$TOKEN" | parse_result)
@@ -306,23 +319,23 @@ fi
 # ---------------------------------------------------------------
 # TS-047: MCP Search with All Parameters
 # ---------------------------------------------------------------
-run_test "TS-047" "MCP search with category filter, fulltext, limit"
+run_test "TS-047" "MCP search with tag filter, fulltext, limit"
 
 # Setup more docs
-$BIN categories add admin --description "Admin" >/dev/null 2>&1 || true
-$BIN categories add work --description "Work" >/dev/null 2>&1 || true
+$BIN tags add admin --description "Admin" >/dev/null 2>&1 || true
+$BIN tags add work --description "Work" >/dev/null 2>&1 || true
 
 ABS_CSV=$(cd "$FIXTURES" && pwd)/sample.csv
-$BIN index "$ABS_CSV" --category work >/dev/null 2>&1
+$BIN index "$ABS_CSV" --tags work >/dev/null 2>&1
 
-# Category filter
-CAT_SEARCH=$(mcp_tool_call "search" '{"query":"document","category":"mcp_test"}' "$TOKEN" | parse_result)
-CAT_OK=$(echo "$CAT_SEARCH" | python3 -c "
+# Tag filter
+TAG_SEARCH=$(mcp_tool_call "search" '{"query":"document","tags":["mcp_test"]}' "$TOKEN" | parse_result)
+TAG_OK=$(echo "$TAG_SEARCH" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
 data = d.get('_data', d)
 if isinstance(data, list):
-    wrong = [r for r in data if r.get('category_name') != 'mcp_test']
+    wrong = [r for r in data if 'mcp_test' not in (r.get('tag_names') or '')]
     print('yes' if not wrong else 'no')
 else:
     print('yes')  # empty is ok
@@ -343,31 +356,31 @@ else:
     print(0)
 " 2>/dev/null || echo "0")
 
-if [ "$CAT_OK" = "yes" ] && [ "$LIM_COUNT" -le 1 ] 2>/dev/null; then
+if [ "$TAG_OK" = "yes" ] && [ "$LIM_COUNT" -le 1 ] 2>/dev/null; then
     pass_test
 else
-    fail_test "cat_ok=$CAT_OK, limit_count=$LIM_COUNT"
+    fail_test "tag_ok=$TAG_OK, limit_count=$LIM_COUNT"
 fi
 
 # ---------------------------------------------------------------
-# TS-048: MCP Index with Category
+# TS-048: MCP Index with Tags
 # ---------------------------------------------------------------
-run_test "TS-048" "MCP index with category parameter"
+run_test "TS-048" "MCP index with tags parameter"
 
 ABS_FR=$(cd "$FIXTURES" && pwd)/document_fr.txt
-IDX_RESP=$(mcp_tool_call "index_file" "{\"path\":\"$ABS_FR\",\"category\":\"admin\"}" "$TOKEN" | parse_result)
+IDX_RESP=$(mcp_tool_call "index_file" "{\"path\":\"$ABS_FR\",\"tags\":[\"admin\"]}" "$TOKEN" | parse_result)
 IS_ERROR=$(echo "$IDX_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
 if [ "$IS_ERROR" = "True" ]; then
-    fail_test "Index with category failed: $IDX_RESP"
+    fail_test "Index with tags failed: $IDX_RESP"
 else
-    # Verify category
+    # Verify tags
     GET_RESP=$(mcp_tool_call "get_document" "{\"path\":\"$ABS_FR\"}" "$TOKEN" | parse_result)
-    CAT=$(echo "$GET_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('category',''))" 2>/dev/null)
-    if [ "$CAT" = "admin" ]; then
+    HAS_TAG=$(echo "$GET_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); tags=d.get('tags',[]); print('yes' if 'admin' in tags else 'no')" 2>/dev/null)
+    if [ "$HAS_TAG" = "yes" ]; then
         pass_test
     else
-        fail_test "Expected category 'admin', got '$CAT'"
+        fail_test "Expected tag 'admin' in document tags, got: $(echo "$GET_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tags',[]))" 2>/dev/null)"
     fi
 fi
 
@@ -377,29 +390,25 @@ fi
 run_test "TS-050" "MCP tool error paths"
 
 # Non-existent file
-ERR1=$(mcp_tool_call "index_file" '{"path":"/nonexistent/file.jpg","category":"mcp_test"}' "$TOKEN" | parse_result)
+ERR1=$(mcp_tool_call "index_file" '{"path":"/nonexistent/file.jpg"}' "$TOKEN" | parse_result)
 IS_ERR1=$(echo "$ERR1" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
-# Non-existent category
-ERR2=$(mcp_tool_call "index_file" '{"path":"'"$ABS_IMG"'","category":"nonexistent_cat_abc"}' "$TOKEN" | parse_result)
+# Non-existent document (get)
+ERR2=$(mcp_tool_call "get_document" '{"path":"/nonexistent.pdf"}' "$TOKEN" | parse_result)
 IS_ERR2=$(echo "$ERR2" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
-# Non-existent document (get)
-ERR3=$(mcp_tool_call "get_document" '{"path":"/nonexistent.pdf"}' "$TOKEN" | parse_result)
+# Non-existent document (delete)
+ERR3=$(mcp_tool_call "delete_document" '{"path":"/nonexistent.pdf"}' "$TOKEN" | parse_result)
 IS_ERR3=$(echo "$ERR3" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
-# Non-existent document (delete)
-ERR4=$(mcp_tool_call "delete_document" '{"path":"/nonexistent.pdf"}' "$TOKEN" | parse_result)
+# Non-existent tag in search
+ERR4=$(mcp_tool_call "search" '{"query":"test","tags":["nonexistent_tag_abc"]}' "$TOKEN" | parse_result)
 IS_ERR4=$(echo "$ERR4" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
 
-# Non-existent category in search
-ERR5=$(mcp_tool_call "search" '{"query":"test","category":"nonexistent_cat_abc"}' "$TOKEN" | parse_result)
-IS_ERR5=$(echo "$ERR5" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('_isError', False))" 2>/dev/null)
-
-if [ "$IS_ERR1" = "True" ] && [ "$IS_ERR2" = "True" ] && [ "$IS_ERR3" = "True" ] && [ "$IS_ERR4" = "True" ] && [ "$IS_ERR5" = "True" ]; then
+if [ "$IS_ERR1" = "True" ] && [ "$IS_ERR2" = "True" ] && [ "$IS_ERR3" = "True" ] && [ "$IS_ERR4" = "True" ]; then
     pass_test
 else
-    fail_test "err1=$IS_ERR1 err2=$IS_ERR2 err3=$IS_ERR3 err4=$IS_ERR4 err5=$IS_ERR5"
+    fail_test "err1=$IS_ERR1 err2=$IS_ERR2 err3=$IS_ERR3 err4=$IS_ERR4"
 fi
 
 # ---------------------------------------------------------------
@@ -467,44 +476,44 @@ else
     fail_test "Expected 401, got $NO_AUTH_STATUS"
 fi
 
-# --- REST API: Categories CRUD ---
-run_test "TS-056b" "REST API categories CRUD"
+# --- REST API: Tags CRUD ---
+run_test "TS-056b" "REST API tags CRUD"
 
-# Create category
-CREATE_RESP=$(api_post "/api/categories" '{"name":"api_test_cat","description":"API test category"}')
+# Create tag
+CREATE_RESP=$(api_post "/api/tags" '{"name":"api_test_tag","description":"API test tag"}')
 CREATE_NAME=$(echo "$CREATE_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null)
 
-# List categories
-LIST_RESP=$(api_get "/api/categories")
-HAS_CAT=$(echo "$LIST_RESP" | python3 -c "import json,sys; cats=json.load(sys.stdin); print('yes' if any(c.get('name')=='api_test_cat' for c in cats) else 'no')" 2>/dev/null)
+# List tags
+LIST_RESP=$(api_get "/api/tags")
+HAS_TAG=$(echo "$LIST_RESP" | python3 -c "import json,sys; tags=json.load(sys.stdin); print('yes' if any(t.get('name')=='api_test_tag' for t in tags) else 'no')" 2>/dev/null)
 
 # Get by name
-GET_CAT=$(api_get "/api/categories/api_test_cat")
-GET_NAME=$(echo "$GET_CAT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null)
+GET_TAG=$(api_get "/api/tags/api_test_tag")
+GET_NAME=$(echo "$GET_TAG" | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null)
 
 # Update
-UPD_CAT=$(api_put "/api/categories/api_test_cat" '{"description":"Updated desc"}')
-UPD_DESC=$(echo "$UPD_CAT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('description',''))" 2>/dev/null)
+UPD_TAG=$(api_put "/api/tags/api_test_tag" '{"description":"Updated desc"}')
+UPD_DESC=$(echo "$UPD_TAG" | python3 -c "import json,sys; print(json.load(sys.stdin).get('description',''))" 2>/dev/null)
 
 # Delete
-DEL_CAT=$(api_delete "/api/categories/api_test_cat")
-DEL_OK=$(echo "$DEL_CAT" | python3 -c "import json,sys; print('yes' if json.load(sys.stdin).get('deleted') else 'no')" 2>/dev/null)
+DEL_TAG=$(api_delete "/api/tags/api_test_tag")
+DEL_OK=$(echo "$DEL_TAG" | python3 -c "import json,sys; print('yes' if json.load(sys.stdin).get('deleted') else 'no')" 2>/dev/null)
 
-if [ "$CREATE_NAME" = "api_test_cat" ] && [ "$HAS_CAT" = "yes" ] && [ "$GET_NAME" = "api_test_cat" ] && [ "$UPD_DESC" = "Updated desc" ] && [ "$DEL_OK" = "yes" ]; then
+if [ "$CREATE_NAME" = "api_test_tag" ] && [ "$HAS_TAG" = "yes" ] && [ "$GET_NAME" = "api_test_tag" ] && [ "$UPD_DESC" = "Updated desc" ] && [ "$DEL_OK" = "yes" ]; then
     pass_test
 else
-    fail_test "create=$CREATE_NAME list=$HAS_CAT get=$GET_NAME upd=$UPD_DESC del=$DEL_OK"
+    fail_test "create=$CREATE_NAME list=$HAS_TAG get=$GET_NAME upd=$UPD_DESC del=$DEL_OK"
 fi
 
 # --- REST API: Documents (index, get, search, delete) ---
 run_test "TS-056c" "REST API document operations"
 
-# Ensure category exists
-api_post "/api/categories" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1
+# Ensure tag exists
+api_post "/api/tags" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1
 
 # Index a file
 ABS_TXT_API=$(cd "$FIXTURES" && pwd)/sample_text.txt
-INDEX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_API\",\"category\":\"api_doc_test\"}")
+INDEX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_API\",\"tags\":[\"api_doc_test\"]}")
 DOC_ID=$(echo "$INDEX_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('document_id',''))" 2>/dev/null)
 
 if [ -z "$DOC_ID" ] || [ "$DOC_ID" = "" ]; then
@@ -560,17 +569,17 @@ run_test "TS-056f" "REST API error responses"
 ERR_STATUS=$(api_get_status "/api/documents")
 # Invalid UUID
 ERR_UUID_STATUS=$(api_get_status "/api/documents/not-a-uuid")
-# Non-existent category
-ERR_CAT_STATUS=$(api_get_status "/api/categories/nonexistent_api_cat_xyz")
+# Non-existent tag
+ERR_TAG_STATUS=$(api_get_status "/api/tags/nonexistent_api_tag_xyz")
 
-if [ "$ERR_STATUS" = "400" ] && [ "$ERR_UUID_STATUS" = "400" ] && [ "$ERR_CAT_STATUS" = "400" ]; then
+if [ "$ERR_STATUS" = "400" ] && [ "$ERR_UUID_STATUS" = "400" ] && [ "$ERR_TAG_STATUS" = "400" ]; then
     pass_test
 else
-    fail_test "missing_query=$ERR_STATUS invalid_uuid=$ERR_UUID_STATUS bad_cat=$ERR_CAT_STATUS"
+    fail_test "missing_query=$ERR_STATUS invalid_uuid=$ERR_UUID_STATUS bad_tag=$ERR_TAG_STATUS"
 fi
 
 # Cleanup REST API test data
-api_delete "/api/categories/api_doc_test" >/dev/null 2>&1
+api_delete "/api/tags/api_doc_test" >/dev/null 2>&1
 
 # ---------------------------------------------------------------
 # TS-057: MCP tools/list Method
@@ -593,7 +602,7 @@ names = sorted([t.get('name','') for t in tools])
 print(','.join(names))
 " 2>/dev/null || echo "")
 
-EXPECTED_TOOLS="delete_document,get_document,index_file,list_categories,search,status,update"
+EXPECTED_TOOLS="delete_document,get_document,index_file,list_tags,search,status,update"
 if [ "$TOOL_COUNT" -eq 7 ] && [ "$TOOL_NAMES" = "$EXPECTED_TOOLS" ]; then
     pass_test
 else
@@ -607,7 +616,7 @@ run_test "TS-058" "MCP update tool"
 
 # Index a file first
 ABS_UPDATE=$(cd "$FIXTURES" && pwd)/sample_text.txt
-$BIN index "$ABS_UPDATE" --category mcp_test >/dev/null 2>&1 || true
+$BIN index "$ABS_UPDATE" --tags mcp_test >/dev/null 2>&1 || true
 
 # Call update via MCP (single file path, no force)
 UPDATE_RESP=$(mcp_tool_call "update" "{\"path\":\"$ABS_UPDATE\",\"force\":false}" "$TOKEN" | parse_result)
@@ -629,9 +638,9 @@ fi
 run_test "TS-059" "REST API update single document by ID"
 
 # Ensure a doc is indexed
-api_post "/api/categories" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1 || true
+api_post "/api/tags" '{"name":"api_doc_test","description":"API doc test"}' >/dev/null 2>&1 || true
 ABS_TXT_UPD=$(cd "$FIXTURES" && pwd)/sample_text.txt
-IDX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_UPD\",\"category\":\"api_doc_test\"}")
+IDX_RESP=$(api_post "/api/documents" "{\"path\":\"$ABS_TXT_UPD\",\"tags\":[\"api_doc_test\"]}")
 UPD_DOC_ID=$(echo "$IDX_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('document_id',''))" 2>/dev/null)
 
 if [ -z "$UPD_DOC_ID" ] || [ "$UPD_DOC_ID" = "" ]; then
@@ -657,7 +666,7 @@ else
     # Cleanup
     api_delete "/api/documents/$UPD_DOC_ID" >/dev/null 2>&1
 fi
-api_delete "/api/categories/api_doc_test" >/dev/null 2>&1
+api_delete "/api/tags/api_doc_test" >/dev/null 2>&1
 
 # ---------------------------------------------------------------
 # Summary

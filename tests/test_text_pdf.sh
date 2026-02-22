@@ -25,8 +25,10 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('docs', 'data');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM tags WHERE name IN ('docs', 'data');" >/dev/null 2>&1 || true
 }
+
+trap cleanup EXIT
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -71,9 +73,9 @@ fail_test() {
 
 echo "=== Lot 3: PDF, Text & Spreadsheet Indexing Tests ==="
 
-# Create categories
-$BIN categories add docs --description "Documents" >/dev/null 2>&1 || true
-$BIN categories add data --description "Data files" >/dev/null 2>&1 || true
+# Create tags
+$BIN tags add docs --description "Documents" >/dev/null 2>&1 || true
+$BIN tags add data --description "Data files" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------
 # TS-002: Index a PDF File
@@ -81,7 +83,7 @@ $BIN categories add data --description "Data files" >/dev/null 2>&1 || true
 run_test "TS-002" "Index a multi-page PDF"
 
 PDF_PATH=$(cd "$FIXTURES" && pwd)/multipage.pdf
-OUTPUT=$($BIN index "$PDF_PATH" --category docs 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$PDF_PATH" --tags docs 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index PDF failed: $OUTPUT"
@@ -144,7 +146,7 @@ fi
 run_test "TS-004" "Index a plain text file"
 
 TXT_PATH=$(cd "$FIXTURES" && pwd)/sample_text.txt
-OUTPUT=$($BIN index "$TXT_PATH" --category docs 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$TXT_PATH" --tags docs 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index text failed: $OUTPUT"
@@ -177,7 +179,7 @@ fi
 run_test "TS-005" "Index a CSV spreadsheet"
 
 CSV_PATH=$(cd "$FIXTURES" && pwd)/sample.csv
-OUTPUT=$($BIN index "$CSV_PATH" --category data 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$CSV_PATH" --tags data 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index CSV failed: $OUTPUT"
@@ -210,7 +212,7 @@ fi
 run_test "TS-037" "Index an XLSX spreadsheet"
 
 XLSX_PATH=$(cd "$FIXTURES" && pwd)/sample.xlsx
-OUTPUT=$($BIN index "$XLSX_PATH" --category data 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$XLSX_PATH" --tags data 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Index XLSX failed: $OUTPUT"
@@ -280,7 +282,7 @@ run_test "TS-051" "Reject empty/unreadable text file"
 
 EMPTY_TXT="$FIXTURES/empty_test.txt"
 touch "$EMPTY_TXT"
-OUTPUT=$($BIN index "$EMPTY_TXT" --category docs 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$EMPTY_TXT" --tags docs 2>&1) && RC=0 || RC=$?
 
 if [ $RC -eq 0 ]; then
     fail_test "Expected failure for empty text file"
@@ -301,7 +303,7 @@ run_test "TS-052" "Reject corrupt spreadsheet files"
 CORRUPT_CSV="$FIXTURES/corrupt_test.csv"
 dd if=/dev/urandom of="$CORRUPT_CSV" bs=512 count=1 2>/dev/null
 
-OUTPUT=$($BIN index "$CORRUPT_CSV" --category data 2>&1) && RC_CSV=0 || RC_CSV=$?
+OUTPUT=$($BIN index "$CORRUPT_CSV" --tags data 2>&1) && RC_CSV=0 || RC_CSV=$?
 
 # Clean up
 rm -f "$CORRUPT_CSV"

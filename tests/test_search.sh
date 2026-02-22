@@ -22,8 +22,10 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/generated/%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('administratif', 'travail', 'search_test');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM tags WHERE name IN ('administratif', 'travail', 'search_test');" >/dev/null 2>&1 || true
 }
+
+trap cleanup EXIT
 
 assert_eq() {
     if [ "$2" != "$3" ]; then echo "FAIL: $1 (expected='$2', got='$3')"; exit 1; fi
@@ -40,47 +42,60 @@ run_test() { echo -n "  $1: $2... "; }
 pass_test() { echo "OK"; PASS=$((PASS + 1)); }
 fail_test() { echo "FAIL: $1"; ERRORS=$((ERRORS + 1)); }
 
+# Index with retry (handles Gemini API rate limits)
+index_with_retry() {
+    local path="$1" tags="$2"
+    for attempt in 1 2 3; do
+        if $BIN index "$path" --tags "$tags" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep $((attempt * 10))
+    done
+    echo "WARN: indexing $path failed after 3 attempts" >&2
+    return 1
+}
+
 echo "=== Lot 4: Search Tests ==="
 
 # ---------------------------------------------------------------
 # TS-023: Search on Empty Index
 # ---------------------------------------------------------------
-run_test "TS-023" "Search on empty category returns empty result"
+run_test "TS-023" "Search on empty tag returns empty result"
 
-# Use a dedicated empty category so real indexed documents don't interfere
-$BIN categories add search_test --description "Empty test category" >/dev/null 2>&1 || true
-OUTPUT=$($BIN search "passport" --category search_test --format json 2>/dev/null) && RC=0 || RC=$?
+# Use a dedicated empty tag so real indexed documents don't interfere
+$BIN tags add search_test --description "Empty test tag" >/dev/null 2>&1 || true
+OUTPUT=$($BIN search "passport" --tags search_test --format json 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Search on empty category failed with non-zero exit"
+    fail_test "Search on empty tag failed with non-zero exit"
 else
     if echo "$OUTPUT" | grep -q "No results found"; then
         pass_test
     else
         RESULT_COUNT=$(echo "$OUTPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
-        assert_eq "empty category result count" "0" "$RESULT_COUNT"
+        assert_eq "empty tag result count" "0" "$RESULT_COUNT"
         pass_test
     fi
 fi
 
-# Setup: Index multiple documents in different categories
-$BIN categories add administratif --description "Documents administratifs" >/dev/null 2>&1 || true
-$BIN categories add travail --description "Documents de travail" >/dev/null 2>&1 || true
+# Setup: Index multiple documents with different tags
+$BIN tags add administratif --description "Documents administratifs" >/dev/null 2>&1 || true
+$BIN tags add travail --description "Documents de travail" >/dev/null 2>&1 || true
 
 ABS_OFFICIAL=$(cd "$FIXTURES" && pwd)/official_document.jpg
 ABS_TEXT=$(cd "$FIXTURES" && pwd)/sample_text.txt
 ABS_PDF=$(cd "$FIXTURES" && pwd)/multipage.pdf
 
-$BIN index "$ABS_OFFICIAL" --category administratif >/dev/null 2>&1
-$BIN index "$ABS_TEXT" --category travail >/dev/null 2>&1
-$BIN index "$ABS_PDF" --category travail >/dev/null 2>&1
+index_with_retry "$ABS_OFFICIAL" administratif
+index_with_retry "$ABS_TEXT" travail
+index_with_retry "$ABS_PDF" travail
 
 # ---------------------------------------------------------------
 # TS-009: Semantic Search Returns Relevant Results
 # ---------------------------------------------------------------
 run_test "TS-009" "Semantic search for passport"
 
-OUTPUT=$($BIN search "passport Sebastien Morand" --category administratif --format json 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN search "passport Sebastien Morand" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
     fail_test "Semantic search failed"
@@ -143,48 +158,48 @@ print('yes' if found else 'no')
 fi
 
 # ---------------------------------------------------------------
-# TS-011: Category-Filtered Search
+# TS-011: Tag-Filtered Search
 # ---------------------------------------------------------------
-run_test "TS-011" "Category-filtered search"
+run_test "TS-011" "Tag-filtered search"
 
-OUTPUT=$($BIN search "document" --category administratif --format json 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN search "document" --tags administratif --format json 2>/dev/null) && RC=0 || RC=$?
 
 if [ $RC -ne 0 ]; then
-    fail_test "Category search failed"
+    fail_test "Tag search failed"
 else
-    # All results should be in category administratif
-    WRONG_CAT=$(echo "$OUTPUT" | python3 -c "
+    # All results should have the administratif tag
+    WRONG_TAG=$(echo "$OUTPUT" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
 if len(d) == 0:
     print('empty')
 else:
-    wrong = [r for r in d if r.get('category_name') != 'administratif']
+    wrong = [r for r in d if 'administratif' not in (r.get('tag_names') or '')]
     print('yes' if wrong else 'no')
 " 2>/dev/null)
-    if [ "$WRONG_CAT" = "empty" ]; then
-        fail_test "No results in category administratif"
-    elif [ "$WRONG_CAT" = "no" ]; then
+    if [ "$WRONG_TAG" = "empty" ]; then
+        fail_test "No results with tag administratif"
+    elif [ "$WRONG_TAG" = "no" ]; then
         pass_test
     else
-        fail_test "Results include wrong categories"
+        fail_test "Results include wrong tags"
     fi
 fi
 
 # ---------------------------------------------------------------
-# TS-029: Search with Non-Existent Category
+# TS-029: Search with Non-Existent Tag
 # ---------------------------------------------------------------
-run_test "TS-029" "Search with non-existent category"
+run_test "TS-029" "Search with non-existent tag"
 
-OUTPUT=$($BIN search "test" --category nonexistent_cat_xyz 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN search "test" --tags nonexistent_tag_xyz 2>&1) && RC=0 || RC=$?
 
 if [ $RC -eq 0 ]; then
-    fail_test "Expected error for non-existent category"
+    fail_test "Expected error for non-existent tag"
 else
-    if echo "$OUTPUT" | grep -qi "category"; then
+    if echo "$OUTPUT" | grep -qi "tag"; then
         pass_test
     else
-        fail_test "Error should mention category: $OUTPUT"
+        fail_test "Error should mention tag: $OUTPUT"
     fi
 fi
 

@@ -22,9 +22,11 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('cli_test', 'cli_test2');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM tags WHERE name IN ('cli_test', 'cli_test2');" >/dev/null 2>&1 || true
     rm -rf "$SCRIPT_DIR/fixtures/test_dir" 2>/dev/null || true
 }
+
+trap cleanup EXIT
 
 assert_eq() {
     if [ "$2" != "$3" ]; then echo "FAIL: $1 (expected='$2', got='$3')"; exit 1; fi
@@ -46,15 +48,15 @@ echo "=== Lot 5: CLI Workflow Tests ==="
 # ---------------------------------------------------------------
 # TS-014: Full CLI Workflow
 # ---------------------------------------------------------------
-run_test "TS-014" "Full CLI workflow (create category, index, search, show, status, delete)"
+run_test "TS-014" "Full CLI workflow (create tag, index, search, show, status, delete)"
 
-# 1. Create category
-$BIN categories add cli_test --description "CLI test category" >/dev/null 2>&1 && RC=0 || RC=$?
-assert_eq "create category" "0" "$RC"
+# 1. Create tag
+$BIN tags add cli_test --description "CLI test tag" >/dev/null 2>&1 && RC=0 || RC=$?
+assert_eq "create tag" "0" "$RC"
 
 # 2. Index file
 ABS_IMG=$(cd "$FIXTURES" && pwd)/official_document.jpg
-$BIN index "$ABS_IMG" --category cli_test >/dev/null 2>&1 && RC=0 || RC=$?
+$BIN index "$ABS_IMG" --tags cli_test >/dev/null 2>&1 && RC=0 || RC=$?
 assert_eq "index file" "0" "$RC"
 
 # 3. Search
@@ -98,7 +100,7 @@ fi
 # ---------------------------------------------------------------
 run_test "TS-021" "Index non-existent file"
 
-OUTPUT=$($BIN index "/nonexistent/path/file.jpg" --category cli_test 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "/nonexistent/path/file.jpg" --tags cli_test 2>&1) && RC=0 || RC=$?
 if [ $RC -eq 0 ]; then
     fail_test "Expected error for non-existent file"
 else
@@ -115,7 +117,7 @@ fi
 run_test "TS-022" "Index unsupported file type"
 
 ABS_ZIP=$(cd "$FIXTURES" && pwd)/archive.zip
-OUTPUT=$($BIN index "$ABS_ZIP" --category cli_test 2>&1) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_ZIP" --tags cli_test 2>&1) && RC=0 || RC=$?
 if [ $RC -eq 0 ]; then
     fail_test "Expected error for unsupported file"
 else
@@ -132,8 +134,8 @@ fi
 run_test "TS-024" "Duplicate file indexing (re-index same file)"
 
 ABS_TXT=$(cd "$FIXTURES" && pwd)/sample_text.txt
-$BIN index "$ABS_TXT" --category cli_test >/dev/null 2>&1
-$BIN index "$ABS_TXT" --category cli_test >/dev/null 2>&1
+$BIN index "$ABS_TXT" --tags cli_test >/dev/null 2>&1
+$BIN index "$ABS_TXT" --tags cli_test >/dev/null 2>&1
 
 DOC_COUNT=$(db_query "SELECT count(*) FROM documents WHERE file_path = '$ABS_TXT';")
 assert_eq "no duplicate docs" "1" "$DOC_COUNT"
@@ -178,7 +180,7 @@ cp "$FIXTURES/archive.zip" "$TEST_DIR/unsupported.zip"
 cp "$FIXTURES/diagram.png" "$TEST_DIR/subdir/img2.png"
 
 ABS_TEST_DIR=$(cd "$TEST_DIR" && pwd)
-OUTPUT=$($BIN index "$ABS_TEST_DIR" --category cli_test 2>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_TEST_DIR" --tags cli_test 2>/dev/null) && RC=0 || RC=$?
 assert_eq "recursive index exit" "0" "$RC"
 
 # Should have indexed 3 supported files
@@ -235,26 +237,31 @@ else
 fi
 
 # ---------------------------------------------------------------
-# TS-041: Show Document with Chunks Flag
+# TS-041: Show Document with --no-chunks Flag
 # ---------------------------------------------------------------
-run_test "TS-041" "Show document with --chunks flag"
+run_test "TS-041" "Show document with --no-chunks flag"
 
-# Without chunks
-SHOW_NO_CHUNKS=$($BIN show "$ABS_TXT" 2>/dev/null) && RC=0 || RC=$?
-assert_eq "show without chunks exit" "0" "$RC"
+# Default — shows chunks
+SHOW_DEFAULT=$($BIN show "$ABS_TXT" 2>/dev/null) && RC=0 || RC=$?
+assert_eq "show default exit" "0" "$RC"
 
-# With chunks
-SHOW_CHUNKS=$($BIN show "$ABS_TXT" --chunks 2>/dev/null)
+# With --no-chunks
+SHOW_NO_CHUNKS=$($BIN show "$ABS_TXT" --no-chunks 2>/dev/null)
 
-if echo "$SHOW_CHUNKS" | grep -q "Chunks:"; then
-    # Should show chunk content when --chunks is passed
-    if echo "$SHOW_CHUNKS" | grep -q "type="; then
-        pass_test
+if echo "$SHOW_DEFAULT" | grep -q "Chunks:"; then
+    # Default should show chunk details (type=)
+    if echo "$SHOW_DEFAULT" | grep -q "type="; then
+        # --no-chunks should NOT show chunk detail
+        if echo "$SHOW_NO_CHUNKS" | grep -q "type="; then
+            fail_test "--no-chunks should hide chunk content"
+        else
+            pass_test
+        fi
     else
-        fail_test "Chunks flag should show chunk types"
+        fail_test "Default show should display chunk types"
     fi
 else
-    fail_test "Show with chunks missing Chunks section"
+    fail_test "Show missing Chunks section"
 fi
 
 # ---------------------------------------------------------------
@@ -268,7 +275,7 @@ assert_eq "status json exit" "0" "$RC"
 VALID=$(echo "$JSON_STATUS" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
-fields = ['total_documents', 'total_chunks', 'by_type', 'by_category']
+fields = ['total_documents', 'total_chunks', 'by_type', 'by_tag']
 print('ok' if all(f in d for f in fields) else 'missing')
 " 2>/dev/null || echo "error")
 
@@ -282,7 +289,7 @@ run_test "TS-045" "Verbose mode produces debug logs"
 
 # Index with verbose, capture stderr
 ABS_FR=$(cd "$FIXTURES" && pwd)/document_fr.txt
-OUTPUT=$($BIN index "$ABS_FR" --category cli_test -v 2>&1 1>/dev/null) && RC=0 || RC=$?
+OUTPUT=$($BIN index "$ABS_FR" --tags cli_test -v 2>&1 1>/dev/null) && RC=0 || RC=$?
 
 # Verbose output should contain debug-level log entries
 if echo "$OUTPUT" | grep -q '"level":"DEBUG"\|"level":"INFO"'; then
@@ -302,7 +309,7 @@ fi
 run_test "TS-057" "Delete cascades to chunks and images"
 
 ABS_CASCADE=$(cd "$FIXTURES" && pwd)/official_document.jpg
-$BIN index "$ABS_CASCADE" --category cli_test >/dev/null 2>&1
+$BIN index "$ABS_CASCADE" --tags cli_test >/dev/null 2>&1
 
 DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_CASCADE';")
 CHUNK_COUNT_BEFORE=$(db_query "SELECT count(*) FROM chunks WHERE document_id = '$DOC_ID';")
@@ -332,12 +339,12 @@ fi
 run_test "TS-058" "Deleted document does not appear in search results"
 
 ABS_DEL_SEARCH=$(cd "$FIXTURES" && pwd)/document_fr.txt
-$BIN index "$ABS_DEL_SEARCH" --category cli_test >/dev/null 2>&1
+$BIN index "$ABS_DEL_SEARCH" --tags cli_test >/dev/null 2>&1
 
 DOC_ID=$(db_query "SELECT id FROM documents WHERE file_path = '$ABS_DEL_SEARCH';")
 
 # Search should find it
-SEARCH_BEFORE=$($BIN search "document" --format json --category cli_test 2>/dev/null)
+SEARCH_BEFORE=$($BIN search "document" --format json --tags cli_test 2>/dev/null)
 FOUND_BEFORE=$(echo "$SEARCH_BEFORE" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -348,7 +355,7 @@ print('yes' if any('$ABS_DEL_SEARCH' in str(r.get('file_path','')) for r in d) e
 $BIN delete "$DOC_ID" --yes >/dev/null 2>&1
 
 # Search should NOT find it anymore
-SEARCH_AFTER=$($BIN search "document" --format json --category cli_test 2>/dev/null)
+SEARCH_AFTER=$($BIN search "document" --format json --tags cli_test 2>/dev/null)
 FOUND_AFTER=$(echo "$SEARCH_AFTER" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -374,7 +381,7 @@ fi
 run_test "TS-053" "Help documentation for all subcommands"
 
 ALL_OK=true
-for cmd in index search categories show delete update status mcp; do
+for cmd in index search tags show delete update status mcp; do
     HELP_OUT=$($BIN $cmd --help 2>&1) && RC=0 || RC=$?
     if [ $RC -ne 0 ]; then
         ALL_OK=false

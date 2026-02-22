@@ -15,10 +15,14 @@ func getToolDefinitions() []ToolDefinition {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"query":    map[string]interface{}{"type": "string", "description": "Search query text"},
-					"mode":     map[string]interface{}{"type": "string", "enum": []string{"semantic", "fulltext"}, "description": "Search mode (default: semantic)"},
-					"category": map[string]interface{}{"type": "string", "description": "Filter by category name"},
-					"limit":    map[string]interface{}{"type": "integer", "description": "Maximum number of results (default: 10)"},
+					"query": map[string]interface{}{"type": "string", "description": "Search query text"},
+					"mode":  map[string]interface{}{"type": "string", "enum": []string{"semantic", "fulltext"}, "description": "Search mode (default: semantic)"},
+					"tags": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Filter by tag names (AND logic)",
+					},
+					"limit": map[string]interface{}{"type": "integer", "description": "Maximum number of results (default: 10)"},
 				},
 				"required": []string{"query"},
 			},
@@ -29,10 +33,14 @@ func getToolDefinitions() []ToolDefinition {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"path":     map[string]interface{}{"type": "string", "description": "Absolute path to the file to index"},
-					"category": map[string]interface{}{"type": "string", "description": "Category name to assign"},
+					"path": map[string]interface{}{"type": "string", "description": "Absolute path to the file to index"},
+					"tags": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Tag names to assign (auto-tagging also runs)",
+					},
 				},
-				"required": []string{"path", "category"},
+				"required": []string{"path"},
 			},
 		},
 		{
@@ -47,8 +55,8 @@ func getToolDefinitions() []ToolDefinition {
 			},
 		},
 		{
-			Name:        "list_categories",
-			Description: "List all document categories",
+			Name:        "list_tags",
+			Description: "List all document tags",
 			InputSchema: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},

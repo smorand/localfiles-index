@@ -82,11 +82,11 @@ func (s *Server) setupRoutes() {
 	api.Put("/documents/:id", s.apiUpdateDocument)
 	api.Put("/documents", s.apiUpdateAllDocuments)
 	api.Delete("/documents/:id", s.apiDeleteDocument)
-	api.Get("/categories", s.apiListCategories)
-	api.Get("/categories/:name", s.apiGetCategory)
-	api.Post("/categories", s.apiCreateCategory)
-	api.Put("/categories/:name", s.apiUpdateCategory)
-	api.Delete("/categories/:name", s.apiDeleteCategory)
+	api.Get("/tags", s.apiListTags)
+	api.Get("/tags/:name", s.apiGetTag)
+	api.Post("/tags", s.apiCreateTag)
+	api.Put("/tags/:name", s.apiUpdateTag)
+	api.Delete("/tags/:name", s.apiDeleteTag)
 	api.Get("/status", s.apiStatus)
 
 	// Health check
@@ -299,8 +299,8 @@ func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (i
 		return s.toolIndexFile(ctx, args)
 	case "get_document":
 		return s.toolGetDocument(ctx, args)
-	case "list_categories":
-		return s.toolListCategories(ctx)
+	case "list_tags":
+		return s.toolListTags(ctx)
 	case "delete_document":
 		return s.toolDeleteDocument(ctx, args)
 	case "status":
@@ -337,16 +337,37 @@ func (s *Server) toolSearch(ctx context.Context, args map[string]interface{}) (*
 		mode = "semantic"
 	}
 
-	category, _ := args["category"].(string)
+	// Parse tags from args (can be array or comma-separated string)
+	var tags []string
+	if tagsRaw, ok := args["tags"]; ok {
+		switch v := tagsRaw.(type) {
+		case []interface{}:
+			for _, t := range v {
+				if s, ok := t.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		case string:
+			if v != "" {
+				for _, t := range strings.Split(v, ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tags = append(tags, t)
+					}
+				}
+			}
+		}
+	}
+
 	limit := 10
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)
 	}
 
-	// Validate category
-	if category != "" {
-		if _, err := s.store.GetCategoryByName(ctx, category); err != nil {
-			return errorResult(fmt.Sprintf("category not found: %s", category)), nil
+	// Validate tags
+	for _, t := range tags {
+		if _, err := s.store.GetTagByName(ctx, t); err != nil {
+			return errorResult(fmt.Sprintf("tag not found: %s", t)), nil
 		}
 	}
 
@@ -356,7 +377,7 @@ func (s *Server) toolSearch(ctx context.Context, args map[string]interface{}) (*
 	}
 
 	srch := searcher.New(s.store, emb)
-	results, err := srch.Search(ctx, query, mode, category, limit)
+	results, err := srch.Search(ctx, query, mode, tags, limit)
 	if err != nil {
 		return errorResult(fmt.Sprintf("search failed: %v", err)), nil
 	}
@@ -370,9 +391,26 @@ func (s *Server) toolIndexFile(ctx context.Context, args map[string]interface{})
 		return errorResult("path parameter is required"), nil
 	}
 
-	category, _ := args["category"].(string)
-	if category == "" {
-		return errorResult("category parameter is required"), nil
+	// Parse tags
+	var tags []string
+	if tagsRaw, ok := args["tags"]; ok {
+		switch v := tagsRaw.(type) {
+		case []interface{}:
+			for _, t := range v {
+				if s, ok := t.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		case string:
+			if v != "" {
+				for _, t := range strings.Split(v, ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tags = append(tags, t)
+					}
+				}
+			}
+		}
 	}
 
 	anlz, err := analyzer.New(ctx, s.cfg.GeminiAPIKey, s.cfg.GeminiModel)
@@ -386,7 +424,7 @@ func (s *Server) toolIndexFile(ctx context.Context, args map[string]interface{})
 	}
 
 	idx := indexer.New(s.store, anlz, emb, s.cfg)
-	result, err := idx.IndexFile(ctx, path, category)
+	result, err := idx.IndexFile(ctx, path, tags)
 	if err != nil {
 		return errorResult(fmt.Sprintf("indexing failed: %v", err)), nil
 	}
@@ -396,6 +434,7 @@ func (s *Server) toolIndexFile(ctx context.Context, args map[string]interface{})
 		"title":       result.Title,
 		"chunks":      result.ChunkCount,
 		"images":      result.ImageCount,
+		"tags":        result.Tags,
 	}), nil
 }
 
@@ -443,20 +482,24 @@ func (s *Server) toolGetDocument(ctx context.Context, args map[string]interface{
 		"images":           len(fullDoc.Images),
 	}
 
-	if fullDoc.Category != nil {
-		result["category"] = fullDoc.Category.Name
+	if len(fullDoc.Tags) > 0 {
+		var tagNames []string
+		for _, t := range fullDoc.Tags {
+			tagNames = append(tagNames, t.Name)
+		}
+		result["tags"] = tagNames
 	}
 
 	return textResult(result), nil
 }
 
-func (s *Server) toolListCategories(ctx context.Context) (*ToolResult, *MCPError) {
-	cats, err := s.store.ListCategories(ctx)
+func (s *Server) toolListTags(ctx context.Context) (*ToolResult, *MCPError) {
+	tags, err := s.store.ListTags(ctx)
 	if err != nil {
-		return errorResult(fmt.Sprintf("listing categories: %v", err)), nil
+		return errorResult(fmt.Sprintf("listing tags: %v", err)), nil
 	}
 
-	return textResult(cats), nil
+	return textResult(tags), nil
 }
 
 func (s *Server) toolDeleteDocument(ctx context.Context, args map[string]interface{}) (*ToolResult, *MCPError) {
@@ -549,12 +592,13 @@ func (s *Server) updateSingleDocument(ctx context.Context, idx *indexer.Indexer,
 		return fiber.Map{"updated": 0, "unchanged": 1, "missing": 0}, false, nil
 	}
 
-	categoryName := ""
-	if doc.Category != nil {
-		categoryName = doc.Category.Name
+	// Preserve existing tags
+	var tagNames []string
+	for _, t := range doc.Tags {
+		tagNames = append(tagNames, t.Name)
 	}
 
-	if _, err := idx.IndexFile(ctx, doc.FilePath, categoryName); err != nil {
+	if _, err := idx.IndexFile(ctx, doc.FilePath, tagNames); err != nil {
 		return nil, false, err
 	}
 
@@ -582,12 +626,13 @@ func (s *Server) updateAllDocuments(ctx context.Context, idx *indexer.Indexer, f
 			continue
 		}
 
-		categoryName := ""
-		if doc.Category != nil {
-			categoryName = doc.Category.Name
+		// Preserve existing tags
+		var tagNames []string
+		for _, t := range doc.Tags {
+			tagNames = append(tagNames, t.Name)
 		}
 
-		if _, err := idx.IndexFile(ctx, doc.FilePath, categoryName); err != nil {
+		if _, err := idx.IndexFile(ctx, doc.FilePath, tagNames); err != nil {
 			slog.Error("failed to re-index", "path", doc.FilePath, "error", err)
 			continue
 		}

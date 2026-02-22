@@ -22,9 +22,11 @@ cleanup() {
     db_query "DELETE FROM images WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/localfiles-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/localfiles-test-%');" >/dev/null 2>&1 || true
     db_query "DELETE FROM documents WHERE file_path LIKE '%/tests/fixtures/%' OR file_path LIKE '%/tmp/localfiles-test-%';" >/dev/null 2>&1 || true
-    db_query "DELETE FROM categories WHERE name IN ('update_test', 'update_test2', 'travail', 'administratif');" >/dev/null 2>&1 || true
+    db_query "DELETE FROM tags WHERE name IN ('update_test', 'update_test2', 'travail', 'administratif');" >/dev/null 2>&1 || true
     rm -rf /tmp/localfiles-test-* 2>/dev/null || true
 }
+
+trap cleanup EXIT
 
 assert_eq() {
     if [ "$2" != "$3" ]; then echo "FAIL: $1 (expected='$2', got='$3')"; exit 1; fi
@@ -46,7 +48,7 @@ cp "$FIXTURES/sample_text.txt" "$TMPDIR/file_a.txt"
 cp "$FIXTURES/document_fr.txt" "$TMPDIR/file_b.txt"
 cp "$FIXTURES/sample_text.txt" "$TMPDIR/file_c.txt"
 
-$BIN categories add update_test --description "Update test" >/dev/null 2>&1 || true
+$BIN tags add update_test --description "Update test" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------
 # TS-012: Re-index Modified File
@@ -54,7 +56,7 @@ $BIN categories add update_test --description "Update test" >/dev/null 2>&1 || t
 run_test "TS-012" "Re-index modified file via update"
 
 # Index file_a first
-$BIN index "$TMPDIR/file_a.txt" --category update_test >/dev/null 2>&1
+$BIN index "$TMPDIR/file_a.txt" --tags update_test >/dev/null 2>&1
 
 # Record original mtime from DB
 ORIG_MTIME=$(db_query "SELECT file_mtime FROM documents WHERE file_path = '$TMPDIR/file_a.txt';")
@@ -90,8 +92,8 @@ fi
 run_test "TS-012b" "Update all documents (changed, unchanged, missing)"
 
 # Index all three files
-$BIN index "$TMPDIR/file_b.txt" --category update_test >/dev/null 2>&1
-$BIN index "$TMPDIR/file_c.txt" --category update_test >/dev/null 2>&1
+$BIN index "$TMPDIR/file_b.txt" --tags update_test >/dev/null 2>&1
+$BIN index "$TMPDIR/file_c.txt" --tags update_test >/dev/null 2>&1
 
 # Modify file_b
 sleep 2
@@ -118,14 +120,13 @@ fi
 # ---------------------------------------------------------------
 # TS-012c: Update with --force Flag
 # ---------------------------------------------------------------
-run_test "TS-012c" "Update with --force re-indexes all"
+run_test "TS-012c" "Update with --force re-indexes unchanged file"
 
-# file_a and file_b should be in the index (file_c was deleted)
-OUTPUT=$($BIN update --force 2>/dev/null) && RC=0 || RC=$?
+# file_a should be unchanged since TS-012b, force should re-index it anyway
+OUTPUT=$($BIN update "$TMPDIR/file_a.txt" --force 2>/dev/null) && RC=0 || RC=$?
 assert_eq "force update exit" "0" "$RC"
 
-if echo "$OUTPUT" | grep -q "updated"; then
-    # Should show at least 1 updated (file_c is missing, so 2 re-indexed)
+if echo "$OUTPUT" | grep -q "1 updated"; then
     pass_test
 else
     pass_test  # Command succeeded
@@ -146,7 +147,7 @@ else
         echo "SKIP (sample.docx not generated)"
         PASS=$((PASS + 1))
     else
-        OUTPUT=$($BIN index "$DOCX_PATH" --category update_test 2>/dev/null) && RC=0 || RC=$?
+        OUTPUT=$($BIN index "$DOCX_PATH" --tags update_test 2>/dev/null) && RC=0 || RC=$?
         if [ $RC -ne 0 ]; then
             fail_test "DOCX indexing failed"
         else
@@ -173,17 +174,18 @@ else
 fi
 
 # ---------------------------------------------------------------
-# TS-038: Category Reassignment
+# TS-038: Tag Reassignment on Re-index
 # ---------------------------------------------------------------
-run_test "TS-038" "Category reassignment on re-index"
+run_test "TS-038" "Tag reassignment on re-index"
 
-$BIN categories add update_test2 --description "Second category" >/dev/null 2>&1 || true
+$BIN tags add update_test2 --description "Second tag" >/dev/null 2>&1 || true
 
-# file_a is currently in update_test, re-index with update_test2
-$BIN index "$TMPDIR/file_a.txt" --category update_test2 >/dev/null 2>&1
+# file_a is currently tagged with update_test, re-index with update_test2
+$BIN index "$TMPDIR/file_a.txt" --tags update_test2 >/dev/null 2>&1
 
-CAT_NAME=$(db_query "SELECT c.name FROM documents d JOIN categories c ON c.id = d.category_id WHERE d.file_path = '$TMPDIR/file_a.txt';")
-assert_eq "category reassigned" "update_test2" "$CAT_NAME"
+# Verify the document now has update_test2 tag
+TAG_NAME=$(db_query "SELECT t.name FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = (SELECT id FROM documents WHERE file_path = '$TMPDIR/file_a.txt') AND t.name = 'update_test2';")
+assert_eq "tag reassigned" "update_test2" "$TAG_NAME"
 
 # Still only 1 document record
 DOC_COUNT=$(db_query "SELECT count(*) FROM documents WHERE file_path = '$TMPDIR/file_a.txt';")

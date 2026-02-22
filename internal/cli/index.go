@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -22,7 +23,8 @@ var indexCmd = &cobra.Command{
 		ctx := context.Background()
 		path := args[0]
 
-		category, _ := cmd.Flags().GetString("category")
+		tagsStr, _ := cmd.Flags().GetString("tags")
+		tags := splitTags(tagsStr)
 
 		// Create analyzer and embedder
 		anlz, err := analyzer.New(ctx, cfg.GeminiAPIKey, cfg.GeminiModel)
@@ -44,10 +46,10 @@ var indexCmd = &cobra.Command{
 		}
 
 		if stat.IsDir() {
-			return indexDirectory(ctx, idx, path, category)
+			return indexDirectory(ctx, idx, path, tags)
 		}
 
-		result, err := idx.IndexFile(ctx, path, category)
+		result, err := idx.IndexFile(ctx, path, tags)
 		if err != nil {
 			return err
 		}
@@ -58,12 +60,15 @@ var indexCmd = &cobra.Command{
 		if result.ImageCount > 0 {
 			fmt.Printf("  Images: %d\n", result.ImageCount)
 		}
+		if len(result.Tags) > 0 {
+			fmt.Printf("  Tags: %s\n", strings.Join(result.Tags, ", "))
+		}
 
 		return nil
 	},
 }
 
-func indexDirectory(ctx context.Context, idx *indexer.Indexer, dir string, category string) error {
+func indexDirectory(ctx context.Context, idx *indexer.Indexer, dir string, tags []string) error {
 	var indexed, skipped, errors int
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -80,7 +85,7 @@ func indexDirectory(ctx context.Context, idx *indexer.Indexer, dir string, categ
 			return nil
 		}
 
-		result, err := idx.IndexFile(ctx, path, category)
+		result, err := idx.IndexFile(ctx, path, tags)
 		if err != nil {
 			slog.Error("failed to index file", "path", path, "error", err)
 			errors++
@@ -100,8 +105,23 @@ func indexDirectory(ctx context.Context, idx *indexer.Indexer, dir string, categ
 	return nil
 }
 
+// splitTags splits a comma-separated tag string into a slice of trimmed, non-empty names.
+func splitTags(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var tags []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tags = append(tags, p)
+		}
+	}
+	return tags
+}
+
 func init() {
-	indexCmd.Flags().StringP("category", "c", "", "Category name to assign (required)")
-	_ = indexCmd.MarkFlagRequired("category")
+	indexCmd.Flags().StringP("tags", "t", "", "Comma-separated tag names to assign")
 	rootCmd.AddCommand(indexCmd)
 }

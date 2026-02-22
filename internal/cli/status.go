@@ -42,10 +42,10 @@ var statusCmd = &cobra.Command{
 				w.Flush()
 			}
 
-			if len(stats.ByCategory) > 0 {
-				fmt.Println("\nBy Category:")
+			if len(stats.ByTag) > 0 {
+				fmt.Println("\nBy Tag:")
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				for c, count := range stats.ByCategory {
+				for c, count := range stats.ByTag {
 					fmt.Fprintf(w, "  %s\t%d\n", c, count)
 				}
 				w.Flush()

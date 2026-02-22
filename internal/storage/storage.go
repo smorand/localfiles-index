@@ -28,6 +28,9 @@ func New(ctx context.Context, databaseURL string, logger *slog.Logger) (*Store, 
 
 	db := bun.NewDB(sqldb, pgdialect.New())
 
+	// Register junction model for m2m relationships
+	db.RegisterModel((*DocumentTag)(nil))
+
 	if logger.Handler().Enabled(ctx, slog.LevelDebug) {
 		db.AddQueryHook(bunslog.NewQueryHook(
 			bunslog.WithLogger(logger),
@@ -68,121 +71,250 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// --- Category Operations ---
+// --- Tag Operations ---
 
-// CreateCategory creates a new category.
-func (s *Store) CreateCategory(ctx context.Context, name, description string) (*Category, error) {
-	cat := &Category{
+// CreateTag creates a new tag.
+func (s *Store) CreateTag(ctx context.Context, name, description string) (*Tag, error) {
+	tag := &Tag{
 		Name:        strings.ToLower(name),
 		Description: description,
 	}
 
-	_, err := s.db.NewInsert().Model(cat).Exec(ctx)
+	_, err := s.db.NewInsert().Model(tag).Exec(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("creating category: %w", err)
+		return nil, fmt.Errorf("creating tag: %w", err)
 	}
 
-	return cat, nil
+	return tag, nil
 }
 
-// GetCategoryByName returns a category by name.
-func (s *Store) GetCategoryByName(ctx context.Context, name string) (*Category, error) {
-	cat := new(Category)
-	err := s.db.NewSelect().Model(cat).Where("name = ?", strings.ToLower(name)).Scan(ctx)
+// GetTagByName returns a tag by name.
+func (s *Store) GetTagByName(ctx context.Context, name string) (*Tag, error) {
+	tag := new(Tag)
+	err := s.db.NewSelect().Model(tag).Where("name = ?", strings.ToLower(name)).Scan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting category by name: %w", err)
+		return nil, fmt.Errorf("getting tag by name: %w", err)
 	}
-	return cat, nil
+	return tag, nil
 }
 
-// ListCategories returns all categories.
-func (s *Store) ListCategories(ctx context.Context) ([]*Category, error) {
-	var cats []*Category
-	err := s.db.NewSelect().Model(&cats).OrderExpr("name ASC").Scan(ctx)
+// GetTagsByNames returns tags matching the given names.
+func (s *Store) GetTagsByNames(ctx context.Context, names []string) ([]*Tag, error) {
+	lower := make([]string, len(names))
+	for i, n := range names {
+		lower[i] = strings.ToLower(n)
+	}
+
+	var tags []*Tag
+	err := s.db.NewSelect().Model(&tags).Where("name IN (?)", bun.In(lower)).Scan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing categories: %w", err)
+		return nil, fmt.Errorf("getting tags by names: %w", err)
 	}
-	return cats, nil
+	return tags, nil
 }
 
-// UpdateCategory updates a category's description.
-func (s *Store) UpdateCategory(ctx context.Context, name, description string) (*Category, error) {
-	cat := new(Category)
+// ListTags returns all tags.
+func (s *Store) ListTags(ctx context.Context) ([]*Tag, error) {
+	var tags []*Tag
+	err := s.db.NewSelect().Model(&tags).OrderExpr("name ASC").Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing tags: %w", err)
+	}
+	return tags, nil
+}
+
+// UpdateTag updates a tag's description.
+func (s *Store) UpdateTag(ctx context.Context, name, description string) (*Tag, error) {
+	tag := new(Tag)
 	res, err := s.db.NewUpdate().
-		Model(cat).
+		Model(tag).
 		Set("description = ?", description).
 		Where("name = ?", strings.ToLower(name)).
 		Returning("*").
 		Exec(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("updating category: %w", err)
+		return nil, fmt.Errorf("updating tag: %w", err)
 	}
 
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return nil, fmt.Errorf("category not found: %s", name)
+		return nil, fmt.Errorf("tag not found: %s", name)
 	}
 
-	return cat, nil
+	return tag, nil
 }
 
-// DeleteCategory deletes a category. If documents reference it, newCategory must be provided
-// to migrate them. If no documents reference the category, it is deleted directly.
-func (s *Store) DeleteCategory(ctx context.Context, name string, newCategory string) error {
-	cat, err := s.GetCategoryByName(ctx, name)
+// UpdateTagRule updates a tag's auto-tagging rule.
+func (s *Store) UpdateTagRule(ctx context.Context, name, rule string) (*Tag, error) {
+	tag := new(Tag)
+	res, err := s.db.NewUpdate().
+		Model(tag).
+		Set("rule = ?", rule).
+		Where("name = ?", strings.ToLower(name)).
+		Returning("*").
+		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("category not found: %s", name)
+		return nil, fmt.Errorf("updating tag rule: %w", err)
 	}
 
-	// Check for documents referencing this category
-	count, err := s.db.NewSelect().Model((*Document)(nil)).Where("category_id = ?", cat.ID).Count(ctx)
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return nil, fmt.Errorf("tag not found: %s", name)
+	}
+
+	return tag, nil
+}
+
+// DeleteTag deletes a tag and unlinks all documents from it.
+func (s *Store) DeleteTag(ctx context.Context, name string) error {
+	tag, err := s.GetTagByName(ctx, name)
 	if err != nil {
-		return fmt.Errorf("checking category references: %w", err)
+		return fmt.Errorf("tag not found: %s", name)
 	}
 
-	if count > 0 && newCategory == "" {
-		return fmt.Errorf("category has %d documents referencing it, use --new-category to migrate them", count)
-	}
-
-	if count > 0 {
-		// Migrate documents to the new category
-		targetCat, err := s.GetCategoryByName(ctx, newCategory)
-		if err != nil {
-			return fmt.Errorf("target category not found: %s", newCategory)
-		}
-
-		_, err = s.db.NewUpdate().
-			Model((*Document)(nil)).
-			Set("category_id = ?", targetCat.ID).
-			Where("category_id = ?", cat.ID).
-			Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("migrating documents to category %s: %w", newCategory, err)
-		}
-	}
-
-	_, err = s.db.NewDelete().Model((*Category)(nil)).Where("id = ?", cat.ID).Exec(ctx)
+	// Delete tag — CASCADE will remove document_tags entries
+	_, err = s.db.NewDelete().Model((*Tag)(nil)).Where("id = ?", tag.ID).Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("deleting category: %w", err)
+		return fmt.Errorf("deleting tag: %w", err)
 	}
 
 	return nil
 }
 
-// CategoryDocumentCount returns the number of documents in a category.
-func (s *Store) CategoryDocumentCount(ctx context.Context, categoryID uuid.UUID) (int, error) {
-	count, err := s.db.NewSelect().Model((*Document)(nil)).Where("category_id = ?", categoryID).Count(ctx)
+// MergeTag moves all documents from source tag to target tag, then deletes source.
+func (s *Store) MergeTag(ctx context.Context, sourceName, targetName string) error {
+	source, err := s.GetTagByName(ctx, sourceName)
 	if err != nil {
-		return 0, fmt.Errorf("counting category documents: %w", err)
+		return fmt.Errorf("source tag not found: %s", sourceName)
+	}
+
+	target, err := s.GetTagByName(ctx, targetName)
+	if err != nil {
+		return fmt.Errorf("target tag not found: %s", targetName)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Move document_tags from source to target (skip duplicates)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO document_tags (document_id, tag_id, created_at)
+		SELECT document_id, ?, NOW()
+		FROM document_tags
+		WHERE tag_id = ?
+		ON CONFLICT DO NOTHING
+	`, target.ID, source.ID)
+	if err != nil {
+		return fmt.Errorf("merging document_tags: %w", err)
+	}
+
+	// Delete source tag (CASCADE removes its document_tags entries)
+	_, err = tx.NewDelete().Model((*Tag)(nil)).Where("id = ?", source.ID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting source tag: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// TagDocumentCount returns the number of documents with a given tag.
+func (s *Store) TagDocumentCount(ctx context.Context, tagID uuid.UUID) (int, error) {
+	count, err := s.db.NewSelect().
+		Model((*DocumentTag)(nil)).
+		Where("tag_id = ?", tagID).
+		Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("counting tag documents: %w", err)
 	}
 	return count, nil
+}
+
+// --- Document-Tag Operations ---
+
+// SetDocumentTags replaces all tags on a document (auto-creates missing tags).
+func (s *Store) SetDocumentTags(ctx context.Context, docID uuid.UUID, tagNames []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Remove existing tags
+	_, err = tx.NewDelete().Model((*DocumentTag)(nil)).Where("document_id = ?", docID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("removing existing tags: %w", err)
+	}
+
+	if len(tagNames) == 0 {
+		return tx.Commit()
+	}
+
+	// Ensure all tags exist (auto-create missing ones)
+	for _, name := range tagNames {
+		lowerName := strings.ToLower(name)
+		_, err := tx.NewInsert().
+			Model(&Tag{Name: lowerName}).
+			On("CONFLICT (name) DO NOTHING").
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("ensuring tag exists: %w", err)
+		}
+	}
+
+	// Get tag IDs
+	lower := make([]string, len(tagNames))
+	for i, n := range tagNames {
+		lower[i] = strings.ToLower(n)
+	}
+
+	var tags []*Tag
+	err = tx.NewSelect().Model(&tags).Where("name IN (?)", bun.In(lower)).Scan(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching tag IDs: %w", err)
+	}
+
+	// Insert document_tags
+	dts := make([]*DocumentTag, 0, len(tags))
+	for _, tag := range tags {
+		dts = append(dts, &DocumentTag{
+			DocumentID: docID,
+			TagID:      tag.ID,
+		})
+	}
+
+	if len(dts) > 0 {
+		_, err = tx.NewInsert().Model(&dts).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("inserting document_tags: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetDocumentTags returns all tags for a document.
+func (s *Store) GetDocumentTags(ctx context.Context, docID uuid.UUID) ([]*Tag, error) {
+	var tags []*Tag
+	err := s.db.NewSelect().
+		Model(&tags).
+		Join("JOIN document_tags AS dt ON dt.tag_id = t.id").
+		Where("dt.document_id = ?", docID).
+		OrderExpr("t.name ASC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting document tags: %w", err)
+	}
+	return tags, nil
 }
 
 // --- Document Operations ---
 
 // CreateDocument creates a new document record.
 func (s *Store) CreateDocument(ctx context.Context, doc *Document) error {
-	_, err := s.db.NewInsert().Model(doc).Exec(ctx)
+	_, err := s.db.NewInsert().Model(doc).Returning("*").Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("creating document: %w", err)
 	}
@@ -194,7 +326,7 @@ func (s *Store) GetDocumentByPath(ctx context.Context, filePath string) (*Docume
 	doc := new(Document)
 	err := s.db.NewSelect().
 		Model(doc).
-		Relation("Category").
+		Relation("Tags").
 		Where("d.file_path = ?", filePath).
 		Scan(ctx)
 	if err != nil {
@@ -208,7 +340,7 @@ func (s *Store) GetDocumentByID(ctx context.Context, id uuid.UUID) (*Document, e
 	doc := new(Document)
 	err := s.db.NewSelect().
 		Model(doc).
-		Relation("Category").
+		Relation("Tags").
 		Where("d.id = ?", id).
 		Scan(ctx)
 	if err != nil {
@@ -223,7 +355,7 @@ func (s *Store) GetDocumentByIDPrefix(ctx context.Context, prefix string) (*Docu
 	var docs []*Document
 	err := s.db.NewSelect().
 		Model(&docs).
-		Relation("Category").
+		Relation("Tags").
 		Where("d.id::text LIKE ?", prefix+"%").
 		Limit(2).
 		Scan(ctx)
@@ -244,7 +376,7 @@ func (s *Store) GetDocumentWithChunks(ctx context.Context, id uuid.UUID) (*Docum
 	doc := new(Document)
 	err := s.db.NewSelect().
 		Model(doc).
-		Relation("Category").
+		Relation("Tags").
 		Relation("Chunks", func(q *bun.SelectQuery) *bun.SelectQuery {
 			return q.OrderExpr("ch.chunk_index ASC")
 		}).
@@ -262,7 +394,7 @@ func (s *Store) ListDocuments(ctx context.Context) ([]*Document, error) {
 	var docs []*Document
 	err := s.db.NewSelect().
 		Model(&docs).
-		Relation("Category").
+		Relation("Tags").
 		OrderExpr("d.created_at DESC").
 		Scan(ctx)
 	if err != nil {
@@ -370,13 +502,12 @@ func (s *Store) CreateImage(ctx context.Context, img *Image) error {
 // --- Search Operations ---
 
 // SemanticSearch performs vector similarity search.
-func (s *Store) SemanticSearch(ctx context.Context, queryEmbedding []float32, limit int, categoryName string) ([]*SearchResult, error) {
+func (s *Store) SemanticSearch(ctx context.Context, queryEmbedding []float32, limit int, tagNames []string) ([]*SearchResult, error) {
 	vec := pgvector.NewVector(queryEmbedding)
 
 	q := s.db.NewSelect().
 		TableExpr("chunks AS ch").
 		Join("JOIN documents AS d ON d.id = ch.document_id").
-		Join("LEFT JOIN categories AS c ON c.id = d.category_id").
 		ColumnExpr("d.id AS document_id").
 		ColumnExpr("d.title").
 		ColumnExpr("d.file_path").
@@ -385,14 +516,14 @@ func (s *Store) SemanticSearch(ctx context.Context, queryEmbedding []float32, li
 		ColumnExpr("ch.chunk_type").
 		ColumnExpr("ch.chunk_label").
 		ColumnExpr("ch.source_page").
-		ColumnExpr("c.name AS category_name").
+		ColumnExpr("(SELECT string_agg(t.name, ', ' ORDER BY t.name) FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = d.id) AS tag_names").
 		ColumnExpr("1 - (ch.embedding <=> ?) AS similarity", vec).
 		Where("ch.embedding IS NOT NULL").
 		OrderExpr("ch.embedding <=> ? ASC", vec).
 		Limit(limit)
 
-	if categoryName != "" {
-		q = q.Where("c.name = ?", strings.ToLower(categoryName))
+	for _, tn := range tagNames {
+		q = q.Where("EXISTS (SELECT 1 FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = d.id AND t.name = ?)", strings.ToLower(tn))
 	}
 
 	var results []*SearchResult
@@ -405,11 +536,10 @@ func (s *Store) SemanticSearch(ctx context.Context, queryEmbedding []float32, li
 }
 
 // FulltextSearch performs full-text keyword search.
-func (s *Store) FulltextSearch(ctx context.Context, query string, limit int, categoryName string) ([]*SearchResult, error) {
+func (s *Store) FulltextSearch(ctx context.Context, query string, limit int, tagNames []string) ([]*SearchResult, error) {
 	q := s.db.NewSelect().
 		TableExpr("chunks AS ch").
 		Join("JOIN documents AS d ON d.id = ch.document_id").
-		Join("LEFT JOIN categories AS c ON c.id = d.category_id").
 		ColumnExpr("d.id AS document_id").
 		ColumnExpr("d.title").
 		ColumnExpr("d.file_path").
@@ -418,14 +548,14 @@ func (s *Store) FulltextSearch(ctx context.Context, query string, limit int, cat
 		ColumnExpr("ch.chunk_type").
 		ColumnExpr("ch.chunk_label").
 		ColumnExpr("ch.source_page").
-		ColumnExpr("c.name AS category_name").
+		ColumnExpr("(SELECT string_agg(t.name, ', ' ORDER BY t.name) FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = d.id) AS tag_names").
 		ColumnExpr("ts_rank(ch.search_vector, plainto_tsquery('simple', ?)) AS similarity", query).
 		Where("ch.search_vector @@ plainto_tsquery('simple', ?)", query).
 		OrderExpr("ts_rank(ch.search_vector, plainto_tsquery('simple', ?)) DESC", query).
 		Limit(limit)
 
-	if categoryName != "" {
-		q = q.Where("c.name = ?", strings.ToLower(categoryName))
+	for _, tn := range tagNames {
+		q = q.Where("EXISTS (SELECT 1 FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = d.id AND t.name = ?)", strings.ToLower(tn))
 	}
 
 	var results []*SearchResult
@@ -447,7 +577,7 @@ type SearchResult struct {
 	ChunkType    string    `bun:"chunk_type" json:"chunk_type"`
 	ChunkLabel   string    `bun:"chunk_label" json:"chunk_label"`
 	SourcePage   *int      `bun:"source_page" json:"source_page"`
-	CategoryName string    `bun:"category_name" json:"category_name"`
+	TagNames     string    `bun:"tag_names" json:"tag_names"`
 	Similarity   float64   `bun:"similarity" json:"similarity"`
 }
 
@@ -458,14 +588,14 @@ type IndexStats struct {
 	TotalDocuments int            `json:"total_documents"`
 	TotalChunks    int            `json:"total_chunks"`
 	ByType         map[string]int `json:"by_type"`
-	ByCategory     map[string]int `json:"by_category"`
+	ByTag          map[string]int `json:"by_tag"`
 }
 
 // GetStats returns index statistics.
 func (s *Store) GetStats(ctx context.Context) (*IndexStats, error) {
 	stats := &IndexStats{
-		ByType:     make(map[string]int),
-		ByCategory: make(map[string]int),
+		ByType: make(map[string]int),
+		ByTag:  make(map[string]int),
 	}
 
 	// Total documents
@@ -499,23 +629,23 @@ func (s *Store) GetStats(ctx context.Context) (*IndexStats, error) {
 		stats.ByType[row.DocumentType] = row.Count
 	}
 
-	// By category
-	var catRows []struct {
+	// By tag
+	var tagRows []struct {
 		Name  string `bun:"name"`
 		Count int    `bun:"count"`
 	}
 	err = s.db.NewSelect().
-		TableExpr("documents AS d").
-		Join("LEFT JOIN categories AS c ON c.id = d.category_id").
-		ColumnExpr("COALESCE(c.name, 'uncategorized') AS name").
-		ColumnExpr("count(*) AS count").
-		GroupExpr("c.name").
-		Scan(ctx, &catRows)
+		TableExpr("document_tags AS dt").
+		Join("JOIN tags AS t ON t.id = dt.tag_id").
+		ColumnExpr("t.name AS name").
+		ColumnExpr("COUNT(DISTINCT dt.document_id) AS count").
+		GroupExpr("t.name").
+		Scan(ctx, &tagRows)
 	if err != nil {
-		return nil, fmt.Errorf("counting by category: %w", err)
+		return nil, fmt.Errorf("counting by tag: %w", err)
 	}
-	for _, row := range catRows {
-		stats.ByCategory[row.Name] = row.Count
+	for _, row := range tagRows {
+		stats.ByTag[row.Name] = row.Count
 	}
 
 	return stats, nil

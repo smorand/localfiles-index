@@ -7,7 +7,8 @@ Personal file indexing and semantic search system that extracts metadata from lo
 - **Index** images (JPEG, PNG, GIF, WebP, TIFF, BMP), PDFs, text files (TXT, MD, RST, LOG), spreadsheets (CSV, XLSX), and documents (DOC, DOCX, ODT)
 - **Semantic search** using vector similarity with Gemini embeddings
 - **Full-text search** using PostgreSQL tsvector
-- **Category management** for organizing indexed files
+- **Multi-tag system** for organizing indexed files (many-to-many, AND filtering)
+- **Auto-tagging** with per-tag rules evaluated by LLM
 - **AI-powered analysis** with Gemini Flash for content extraction, title generation, and image description
 - **REST JSON API** with standard RESTful conventions at `/api`
 - **MCP HTTP API** (JSON-RPC) for AI tool integration at `/mcp`
@@ -77,11 +78,17 @@ All configuration is via environment variables with sensible defaults:
 ### Index Files
 
 ```bash
-# Index an image (category is required)
-./bin/localfiles-index-darwin-arm64 index /path/to/passport.jpg --category administratif
+# Index an image with tags (tags are auto-created if they don't exist)
+./bin/localfiles-index-darwin-arm64 index /path/to/passport.jpg --tags administratif
+
+# Index with multiple tags (comma-separated)
+./bin/localfiles-index-darwin-arm64 index /path/to/id_card.jpg --tags personaldocument,identitydocument
+
+# Index without tags (auto-tagging still runs based on tag rules)
+./bin/localfiles-index-darwin-arm64 index /path/to/file.jpg
 
 # Index a directory (automatically recursive)
-./bin/localfiles-index-darwin-arm64 index /path/to/documents/ --category work
+./bin/localfiles-index-darwin-arm64 index /path/to/documents/ --tags work
 ```
 
 ### Search
@@ -93,8 +100,9 @@ All configuration is via environment variables with sensible defaults:
 # Full-text search
 ./bin/localfiles-index-darwin-arm64 search "invoice 2024" --mode fulltext
 
-# Filter by category
-./bin/localfiles-index-darwin-arm64 search "document" --category administratif
+# Filter by tags (AND logic — results must have ALL specified tags)
+./bin/localfiles-index-darwin-arm64 search "document" --tags administratif
+./bin/localfiles-index-darwin-arm64 search "passport" --tags personaldocument,identitydocument
 
 # JSON output
 ./bin/localfiles-index-darwin-arm64 search "contract" --format json
@@ -103,21 +111,32 @@ All configuration is via environment variables with sensible defaults:
 ./bin/localfiles-index-darwin-arm64 search "photos Italy" --limit 5
 ```
 
-### Categories
+### Tags
 
 ```bash
-./bin/localfiles-index-darwin-arm64 categories add administratif --description "Administrative docs"
-./bin/localfiles-index-darwin-arm64 categories list
-./bin/localfiles-index-darwin-arm64 categories update administratif --description "Updated description"
-./bin/localfiles-index-darwin-arm64 categories remove administratif [--new-category <name>]
+# Create a tag with optional description and auto-tagging rule
+./bin/localfiles-index-darwin-arm64 tags add passport --description "Passports" --rule "Apply when the document is a passport"
+
+# List all tags with document counts
+./bin/localfiles-index-darwin-arm64 tags list
+
+# Update tag description or rule
+./bin/localfiles-index-darwin-arm64 tags update passport --description "Updated desc" --rule "New rule"
+
+# Remove a tag (unlinks from all documents)
+./bin/localfiles-index-darwin-arm64 tags remove passport
+
+# Merge source tag into target (moves all documents, deletes source)
+./bin/localfiles-index-darwin-arm64 tags merge old_tag new_tag
 ```
 
 ### Document Management
 
 ```bash
-# Show document details
+# Show document details (chunks shown by default)
 ./bin/localfiles-index-darwin-arm64 show /path/to/file.jpg
-./bin/localfiles-index-darwin-arm64 show <uuid> --chunks
+./bin/localfiles-index-darwin-arm64 show <uuid>
+./bin/localfiles-index-darwin-arm64 show <uuid> --no-chunks  # Hide extracted content
 
 # Delete
 ./bin/localfiles-index-darwin-arm64 delete /path/to/file.jpg --yes
@@ -150,7 +169,7 @@ TOKEN=$(curl -s -X POST http://localhost:8080/oauth/token \
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/documents?query=...` | Search documents (required: `query`; optional: `mode`, `category`, `limit`) |
+| `GET` | `/api/documents?query=...` | Search documents (required: `query`; optional: `mode`, `tags`, `limit`) |
 | `POST` | `/api/documents` | Index a new file |
 | `GET` | `/api/documents/:id` | Get document by UUID |
 | `PUT` | `/api/documents/:id` | Re-index a single document |
@@ -162,13 +181,13 @@ TOKEN=$(curl -s -X POST http://localhost:8080/oauth/token \
 curl -H "Authorization: Bearer $TOKEN" \
     "http://localhost:8080/api/documents?query=passport&limit=5"
 
-# Search with category filter and fulltext mode
+# Search with tag filter (comma-separated, AND logic)
 curl -H "Authorization: Bearer $TOKEN" \
-    "http://localhost:8080/api/documents?query=invoice&mode=fulltext&category=admin"
+    "http://localhost:8080/api/documents?query=invoice&mode=fulltext&tags=admin,work"
 
-# Index a file
+# Index a file with tags
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-    -d '{"path":"/path/to/file.jpg","category":"admin"}' \
+    -d '{"path":"/path/to/file.jpg","tags":["admin","identity"]}' \
     http://localhost:8080/api/documents
 
 # Get document by ID
@@ -190,38 +209,38 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" \
     http://localhost:8080/api/documents/550e8400-e29b-41d4-a716-446655440000
 ```
 
-### Categories
+### Tags
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/categories` | List all categories |
-| `GET` | `/api/categories/:name` | Get category by name |
-| `POST` | `/api/categories` | Create a category |
-| `PUT` | `/api/categories/:name` | Update a category |
-| `DELETE` | `/api/categories/:name` | Delete a category (optional: `?new_category=...`) |
+| `GET` | `/api/tags` | List all tags |
+| `GET` | `/api/tags/:name` | Get tag by name |
+| `POST` | `/api/tags` | Create a tag (with optional `rule` for auto-tagging) |
+| `PUT` | `/api/tags/:name` | Update a tag |
+| `DELETE` | `/api/tags/:name` | Delete a tag (unlinks from all documents) |
 
 ```bash
-# List categories
+# List tags
 curl -H "Authorization: Bearer $TOKEN" \
-    http://localhost:8080/api/categories
+    http://localhost:8080/api/tags
 
-# Get category by name
+# Get tag by name
 curl -H "Authorization: Bearer $TOKEN" \
-    http://localhost:8080/api/categories/admin
+    http://localhost:8080/api/tags/admin
 
-# Create a category
+# Create a tag with auto-tagging rule
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-    -d '{"name":"admin","description":"Administrative documents"}' \
-    http://localhost:8080/api/categories
+    -d '{"name":"passport","description":"Passport documents","rule":"Apply when the document is a passport"}' \
+    http://localhost:8080/api/tags
 
-# Update a category
+# Update a tag
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-    -d '{"description":"Updated description"}' \
-    http://localhost:8080/api/categories/admin
+    -d '{"description":"Updated description","rule":"New rule"}' \
+    http://localhost:8080/api/tags/admin
 
-# Delete a category (migrate documents to another category)
+# Delete a tag
 curl -X DELETE -H "Authorization: Bearer $TOKEN" \
-    "http://localhost:8080/api/categories/old_cat?new_category=new_cat"
+    http://localhost:8080/api/tags/admin
 ```
 
 ### Status
@@ -232,7 +251,7 @@ curl -H "Authorization: Bearer $TOKEN" \
     http://localhost:8080/api/status
 ```
 
-Returns: `{"total_documents": N, "total_chunks": N, "by_type": {...}, "by_category": {...}}`
+Returns: `{"total_documents": N, "total_chunks": N, "by_type": {...}, "by_tag": {...}}`
 
 ### Error Responses
 
@@ -281,7 +300,7 @@ curl -X POST http://localhost:8080/mcp \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"query":"passport"}}}'
 ```
 
-**Available MCP tools**: `search`, `index_file`, `get_document`, `list_categories`, `delete_document`, `status`, `update`
+**Available MCP tools**: `search`, `index_file`, `get_document`, `list_tags`, `delete_document`, `status`, `update`
 
 ## OAuth Configuration
 
@@ -346,6 +365,9 @@ File Input --> Detect Type --> Process --> Chunk/Analyze --> Embed --> Store
   analyze    + text + imgs   content   (Gemini)
     |            |            |            |
     +---> Title + Summary + Text Chunks + Embeddings --> PostgreSQL + pgvector
+                                                              |
+                                                        Auto-tagging
+                                                     (LLM evaluates tag rules)
 ```
 
 ## License

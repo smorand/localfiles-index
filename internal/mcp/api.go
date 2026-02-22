@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -38,7 +39,7 @@ func (s *Server) sendToolResult(c fiber.Ctx, result *ToolResult, mcpErr *MCPErro
 
 // --- Document Endpoints ---
 
-// apiSearchDocuments handles GET /api/documents?query=...&mode=...&category=...&limit=...
+// apiSearchDocuments handles GET /api/documents?query=...&mode=...&tags=...&limit=...
 func (s *Server) apiSearchDocuments(c fiber.Ctx) error {
 	query := c.Query("query")
 	if query == "" {
@@ -50,8 +51,15 @@ func (s *Server) apiSearchDocuments(c fiber.Ctx) error {
 	if mode := c.Query("mode"); mode != "" {
 		args["mode"] = mode
 	}
-	if cat := c.Query("category"); cat != "" {
-		args["category"] = cat
+	if tagsStr := c.Query("tags"); tagsStr != "" {
+		var tags []interface{}
+		for _, t := range strings.Split(tagsStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				tags = append(tags, t)
+			}
+		}
+		args["tags"] = tags
 	}
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
@@ -65,15 +73,21 @@ func (s *Server) apiSearchDocuments(c fiber.Ctx) error {
 // apiIndexDocument handles POST /api/documents
 func (s *Server) apiIndexDocument(c fiber.Ctx) error {
 	var body struct {
-		Path     string `json:"path"`
-		Category string `json:"category"`
+		Path string   `json:"path"`
+		Tags []string `json:"tags"`
 	}
 	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid JSON body"})
 	}
 	args := map[string]interface{}{
-		"path":     body.Path,
-		"category": body.Category,
+		"path": body.Path,
+	}
+	if len(body.Tags) > 0 {
+		var tags []interface{}
+		for _, t := range body.Tags {
+			tags = append(tags, t)
+		}
+		args["tags"] = tags
 	}
 	result, mcpErr := s.toolIndexFile(c.Context(), args)
 	return s.sendToolResult(c, result, mcpErr)
@@ -155,32 +169,33 @@ func (s *Server) apiDeleteDocument(c fiber.Ctx) error {
 	return s.sendToolResult(c, result, mcpErr)
 }
 
-// --- Category Endpoints ---
+// --- Tag Endpoints ---
 
-// apiListCategories handles GET /api/categories
-func (s *Server) apiListCategories(c fiber.Ctx) error {
-	cats, err := s.store.ListCategories(c.Context())
+// apiListTags handles GET /api/tags
+func (s *Server) apiListTags(c fiber.Ctx) error {
+	tags, err := s.store.ListTags(c.Context())
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("listing categories: %v", err)})
+		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("listing tags: %v", err)})
 	}
-	return c.JSON(cats)
+	return c.JSON(tags)
 }
 
-// apiGetCategory handles GET /api/categories/:name
-func (s *Server) apiGetCategory(c fiber.Ctx) error {
+// apiGetTag handles GET /api/tags/:name
+func (s *Server) apiGetTag(c fiber.Ctx) error {
 	name := c.Params("name")
-	cat, err := s.store.GetCategoryByName(c.Context(), name)
+	tag, err := s.store.GetTagByName(c.Context(), name)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("category not found: %s", name)})
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("tag not found: %s", name)})
 	}
-	return c.JSON(cat)
+	return c.JSON(tag)
 }
 
-// apiCreateCategory handles POST /api/categories
-func (s *Server) apiCreateCategory(c fiber.Ctx) error {
+// apiCreateTag handles POST /api/tags
+func (s *Server) apiCreateTag(c fiber.Ctx) error {
 	var body struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		Rule        string `json:"rule"`
 	}
 	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid JSON body"})
@@ -188,35 +203,47 @@ func (s *Server) apiCreateCategory(c fiber.Ctx) error {
 	if body.Name == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "name is required"})
 	}
-	cat, err := s.store.CreateCategory(c.Context(), body.Name, body.Description)
+	tag, err := s.store.CreateTag(c.Context(), body.Name, body.Description)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("creating category: %v", err)})
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("creating tag: %v", err)})
 	}
-	return c.Status(201).JSON(cat)
+	if body.Rule != "" {
+		tag, err = s.store.UpdateTagRule(c.Context(), tag.Name, body.Rule)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("setting tag rule: %v", err)})
+		}
+	}
+	return c.Status(201).JSON(tag)
 }
 
-// apiUpdateCategory handles PUT /api/categories/:name
-func (s *Server) apiUpdateCategory(c fiber.Ctx) error {
+// apiUpdateTag handles PUT /api/tags/:name
+func (s *Server) apiUpdateTag(c fiber.Ctx) error {
 	name := c.Params("name")
 	var body struct {
 		Description string `json:"description"`
+		Rule        string `json:"rule"`
 	}
 	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid JSON body"})
 	}
-	cat, err := s.store.UpdateCategory(c.Context(), name, body.Description)
+	tag, err := s.store.UpdateTag(c.Context(), name, body.Description)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("updating category: %v", err)})
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("updating tag: %v", err)})
 	}
-	return c.JSON(cat)
+	if body.Rule != "" {
+		tag, err = s.store.UpdateTagRule(c.Context(), name, body.Rule)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("updating tag rule: %v", err)})
+		}
+	}
+	return c.JSON(tag)
 }
 
-// apiDeleteCategory handles DELETE /api/categories/:name
-func (s *Server) apiDeleteCategory(c fiber.Ctx) error {
+// apiDeleteTag handles DELETE /api/tags/:name
+func (s *Server) apiDeleteTag(c fiber.Ctx) error {
 	name := c.Params("name")
-	newCategory := c.Query("new_category")
-	if err := s.store.DeleteCategory(c.Context(), name, newCategory); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("deleting category: %v", err)})
+	if err := s.store.DeleteTag(c.Context(), name); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("deleting tag: %v", err)})
 	}
 	return c.JSON(fiber.Map{"deleted": true, "name": name})
 }
