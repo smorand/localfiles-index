@@ -23,10 +23,7 @@ var updateCmd = &cobra.Command{
 		ctx := context.Background()
 		force, _ := cmd.Flags().GetBool("force")
 
-		anlz, err := analyzer.New(ctx, cfg.GeminiAPIKey, cfg.GeminiModel)
-		if err != nil {
-			return fmt.Errorf("creating analyzer: %w", err)
-		}
+		anlz := analyzer.New(cfg.OpenRouterAPIKey, cfg.InferenceModel)
 
 		emb, err := embedding.New(ctx, cfg.GeminiAPIKey, cfg.EmbeddingModel, cfg.EmbeddingDimensions)
 		if err != nil {

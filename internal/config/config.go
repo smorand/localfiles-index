@@ -9,8 +9,9 @@ import (
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
 	DatabaseURL              string
+	OpenRouterAPIKey         string
+	InferenceModel           string
 	GeminiAPIKey             string
-	GeminiModel              string
 	EmbeddingModel           string
 	EmbeddingDimensions      int
 	OAuthCredentialsPath     string
@@ -26,8 +27,9 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:              getEnv("DATABASE_URL", "postgresql://localfiles:localfiles@localhost:5432/localfiles?sslmode=disable"),
+		OpenRouterAPIKey:         os.Getenv("OPENROUTER_API_KEY"),
+		InferenceModel:           getEnv("INFERENCE_MODEL", "google/gemini-3-flash-preview"),
 		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:              getEnv("GEMINI_MODEL", "gemini-3-flash-preview"),
 		EmbeddingModel:           getEnv("EMBEDDING_MODEL", "gemini-embedding-001"),
 		EmbeddingDimensions:      getEnvInt("EMBEDDING_DIMENSIONS", 768),
 		OAuthCredentialsPath:     getEnv("OAUTH_CREDENTIALS_PATH", ""),
@@ -39,8 +41,11 @@ func Load() (*Config, error) {
 		LogLevel:                 getEnv("LOG_LEVEL", "info"),
 	}
 
+	if cfg.OpenRouterAPIKey == "" {
+		return nil, fmt.Errorf("OPENROUTER_API_KEY environment variable is required")
+	}
 	if cfg.GeminiAPIKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is required")
+		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is required (used for embeddings)")
 	}
 
 	return cfg, nil

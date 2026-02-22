@@ -413,10 +413,7 @@ func (s *Server) toolIndexFile(ctx context.Context, args map[string]interface{})
 		}
 	}
 
-	anlz, err := analyzer.New(ctx, s.cfg.GeminiAPIKey, s.cfg.GeminiModel)
-	if err != nil {
-		return errorResult(fmt.Sprintf("creating analyzer: %v", err)), nil
-	}
+	anlz := analyzer.New(s.cfg.OpenRouterAPIKey, s.cfg.InferenceModel)
 
 	emb, err := embedding.New(ctx, s.cfg.GeminiAPIKey, s.cfg.EmbeddingModel, s.cfg.EmbeddingDimensions)
 	if err != nil {
@@ -551,10 +548,7 @@ func (s *Server) toolUpdate(ctx context.Context, args map[string]interface{}) (*
 	path, _ := args["path"].(string)
 	force, _ := args["force"].(bool)
 
-	anlz, err := analyzer.New(ctx, s.cfg.GeminiAPIKey, s.cfg.GeminiModel)
-	if err != nil {
-		return errorResult(fmt.Sprintf("creating analyzer: %v", err)), nil
-	}
+	anlz := analyzer.New(s.cfg.OpenRouterAPIKey, s.cfg.InferenceModel)
 
 	emb, err := embedding.New(ctx, s.cfg.GeminiAPIKey, s.cfg.EmbeddingModel, s.cfg.EmbeddingDimensions)
 	if err != nil {

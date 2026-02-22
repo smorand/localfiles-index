@@ -9,7 +9,7 @@ Personal file indexing and semantic search system that extracts metadata from lo
 - **Full-text search** using PostgreSQL tsvector
 - **Multi-tag system** for organizing indexed files (many-to-many, AND filtering)
 - **Auto-tagging** with per-tag rules evaluated by LLM
-- **AI-powered analysis** with Gemini Flash for content extraction, title generation, and image description
+- **AI-powered analysis** via OpenRouter (Gemini Flash) for content extraction, title generation, and image description
 - **REST JSON API** with standard RESTful conventions at `/api`
 - **MCP HTTP API** (JSON-RPC) for AI tool integration at `/mcp`
 - **OAuth 2.1** authentication (client credentials grant) for all API access
@@ -19,7 +19,8 @@ Personal file indexing and semantic search system that extracts metadata from lo
 
 - Go 1.25+
 - PostgreSQL with pgvector extension
-- Gemini API key (`GEMINI_API_KEY` environment variable)
+- OpenRouter API key (`OPENROUTER_API_KEY` environment variable) for AI inference
+- Gemini API key (`GEMINI_API_KEY` environment variable) for embeddings
 - `pdf-extractor` binary (for PDF processing)
 - LibreOffice (for DOC/DOCX conversion, optional)
 
@@ -52,8 +53,9 @@ All configuration is via environment variables with sensible defaults:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql://localfiles:localfiles@localhost:5432/localfiles?sslmode=disable` | PostgreSQL connection |
-| `GEMINI_API_KEY` | (required) | Gemini API key |
-| `GEMINI_MODEL` | `gemini-3-flash-preview` | Model for content analysis |
+| `OPENROUTER_API_KEY` | (required) | OpenRouter API key for AI inference |
+| `INFERENCE_MODEL` | `google/gemini-3-flash-preview` | Model for content analysis (OpenRouter naming) |
+| `GEMINI_API_KEY` | (required) | Gemini API key for embeddings |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` | Model for embeddings |
 | `EMBEDDING_DIMENSIONS` | `768` | Embedding vector dimensions |
 | `CHUNK_SIZE` | `100` | Words per text chunk |
@@ -361,11 +363,11 @@ File Input --> Detect Type --> Process --> Chunk/Analyze --> Embed --> Store
     |            |            |            |
   Image        PDF        Text      Spreadsheet
     |            |            |            |
-  Gemini     pdf-extractor  Read      Read+Analyze
-  analyze    + text + imgs   content   (Gemini)
+  OpenRouter  pdf-extractor  Read      Read+Analyze
+  analyze     + text + imgs  content   (OpenRouter)
     |            |            |            |
     +---> Title + Summary + Text Chunks + Embeddings --> PostgreSQL + pgvector
-                                                              |
+              (OpenRouter)                  (Gemini)          |
                                                         Auto-tagging
                                                      (LLM evaluates tag rules)
 ```

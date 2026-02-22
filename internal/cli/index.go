@@ -27,10 +27,7 @@ var indexCmd = &cobra.Command{
 		tags := splitTags(tagsStr)
 
 		// Create analyzer and embedder
-		anlz, err := analyzer.New(ctx, cfg.GeminiAPIKey, cfg.GeminiModel)
-		if err != nil {
-			return fmt.Errorf("creating analyzer: %w", err)
-		}
+		anlz := analyzer.New(cfg.OpenRouterAPIKey, cfg.InferenceModel)
 
 		emb, err := embedding.New(ctx, cfg.GeminiAPIKey, cfg.EmbeddingModel, cfg.EmbeddingDimensions)
 		if err != nil {
