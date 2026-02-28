@@ -1,7 +1,7 @@
 # LocalFiles Index
 
 ## Overview
-Personal file indexing and semantic search system. Indexes local files (images, PDFs, text, spreadsheets) using AI and enables natural language retrieval via CLI, REST JSON API (`/api`), and MCP JSON-RPC API (`/mcp`).
+Personal file indexing and semantic search system. Indexes local files (images, PDFs, text, spreadsheets) and Google Drive files (Docs, Sheets, any file type) using AI and enables natural language retrieval via CLI, REST JSON API (`/api`), and MCP JSON-RPC API (`/mcp`).
 
 **Tech stack**: Go 1.25, PostgreSQL + pgvector, OpenRouter (inference) + Gemini (embeddings), Cobra CLI, Fiber HTTP, Bun ORM
 
@@ -18,7 +18,7 @@ make db-setup       # Create PostgreSQL database
 ## Binary Usage
 
 ```bash
-./bin/localfiles-index-darwin-arm64 index <path> [-t tag1,tag2]       # tags optional; auto-tagging runs; directories auto-recurse
+./bin/localfiles-index-darwin-arm64 index <path|gdrive://fileId> [-t tag1,tag2]  # tags optional; auto-tagging runs; directories auto-recurse
 ./bin/localfiles-index-darwin-arm64 search <query> [-m semantic|fulltext] [-t tag1,tag2] [-f table|json|detail] [-l limit]
 ./bin/localfiles-index-darwin-arm64 tags add|list|update|remove|merge <name> [--description "..."] [--rule "..."]
 ./bin/localfiles-index-darwin-arm64 show <path|id> [--no-chunks]    # id supports short prefix (8+ hex chars)
@@ -41,8 +41,12 @@ internal/
     models.go                    # Tag, DocumentTag, Document, Chunk, Image
     storage.go                   # CRUD, search, stats queries
     migrations/                  # Auto-run schema migrations (001_initial, 002_tags)
+  gdrive/                        # Google Drive integration
+    types.go                     # GDrivePrefix, GDriveFileInfo, IsGDrivePath/ExtractFileID
+    oauth.go                     # OAuth config loading, token caching, browser auth flow
+    client.go                    # Drive v3 + Sheets v4 client (GetFileInfo, ExportFile, DownloadFile, ReadSpreadsheet)
   indexer/                       # File indexing pipeline
-    indexer.go                   # Orchestrator (image/pdf/text/spreadsheet/doc) + auto-tagging
+    indexer.go                   # Orchestrator (image/pdf/text/spreadsheet/doc/gdrive) + auto-tagging
     detector.go                  # File type detection
     chunker.go                   # Text chunking (100 words, 5 overlap)
     pdfparser.go                 # pdf-extractor JSON output parser
@@ -63,6 +67,7 @@ tests/
   test_cli_workflow.sh           # Full CLI workflow tests (Lot 5)
   test_update.sh                 # Update & conversion tests (Lot 6)
   test_mcp.sh                    # MCP HTTP server + REST API tests (Lot 7)
+  test_gdrive.sh                 # Google Drive indexing tests (conditional, skips without creds)
   fixtures/generate_fixtures.sh  # Test fixture generator
 ```
 
@@ -78,6 +83,9 @@ tests/
 - Search tag filtering uses AND logic (results must have ALL specified tags)
 - Inference uses OpenRouter (OpenAI-compatible API) via `github.com/sashabaranov/go-openai`
 - Embeddings use Gemini API batch calls (all chunks in one request) for rate limit efficiency
+- Google Drive files use `gdrive://<fileId>` as FilePath; Google Docs exported as Markdown, Sheets via Sheets API → JSONL
+- `GOOGLE_CREDENTIALS_FILE` env var for Google OAuth; token cached at `~/.localfiles-index/gdrive-token.json`
+- MCP server requires pre-cached GDrive token (no browser flow); run CLI auth first
 
 ## Maintenance Rules
 - Whenever you modify code, maintain specifications consistency and always update documentation (README.md and CLAUDE.md if relevant)

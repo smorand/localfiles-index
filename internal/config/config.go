@@ -15,6 +15,7 @@ type Config struct {
 	EmbeddingModel           string
 	EmbeddingDimensions      int
 	OAuthCredentialsPath     string
+	GoogleCredentialsFile    string
 	MCPPort                  int
 	TitleConfidenceThreshold float64
 	ChunkSize                int
@@ -33,6 +34,7 @@ func Load() (*Config, error) {
 		EmbeddingModel:           getEnv("EMBEDDING_MODEL", "gemini-embedding-001"),
 		EmbeddingDimensions:      getEnvInt("EMBEDDING_DIMENSIONS", 768),
 		OAuthCredentialsPath:     getEnv("OAUTH_CREDENTIALS_PATH", ""),
+		GoogleCredentialsFile:    getEnv("GOOGLE_CREDENTIALS_FILE", ""),
 		MCPPort:                  getEnvInt("MCP_PORT", 8080),
 		TitleConfidenceThreshold: getEnvFloat("TITLE_CONFIDENCE_THRESHOLD", 0.9),
 		ChunkSize:                getEnvInt("CHUNK_SIZE", 100),

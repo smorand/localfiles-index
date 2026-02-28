@@ -29,11 +29,11 @@ func getToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "index_file",
-			Description: "Index a file by its path into the search index",
+			Description: "Index a file by its local path or Google Drive file ID (gdrive://<fileId>) into the search index",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string", "description": "Absolute path to the file to index"},
+					"path": map[string]interface{}{"type": "string", "description": "Absolute file path or gdrive://<fileId> for Google Drive files"},
 					"tags": map[string]interface{}{
 						"type":        "array",
 						"items":       map[string]interface{}{"type": "string"},

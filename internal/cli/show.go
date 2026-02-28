@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"localfiles-index/internal/gdrive"
 )
 
 // maxChunkDisplayLen is the maximum display width for chunk content preview.
@@ -33,6 +35,9 @@ var showCmd = &cobra.Command{
 		fmt.Printf("Document: %s\n", d.Title)
 		fmt.Printf("  ID:       %s\n", d.ID)
 		fmt.Printf("  Path:     %s\n", d.FilePath)
+		if gdrive.IsGDrivePath(d.FilePath) {
+			fmt.Printf("  Source:   Google Drive\n")
+		}
 		fmt.Printf("  Type:     %s\n", d.DocumentType)
 		fmt.Printf("  MIME:     %s\n", d.MimeType)
 		fmt.Printf("  Size:     %d bytes\n", d.FileSize)

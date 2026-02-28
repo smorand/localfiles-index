@@ -4,7 +4,7 @@ Personal file indexing and semantic search system that extracts metadata from lo
 
 ## Features
 
-- **Index** images (JPEG, PNG, GIF, WebP, TIFF, BMP), PDFs, text files (TXT, MD, RST, LOG), spreadsheets (CSV, XLSX), and documents (DOC, DOCX, ODT)
+- **Index** images (JPEG, PNG, GIF, WebP, TIFF, BMP), PDFs, text files (TXT, MD, RST, LOG), spreadsheets (CSV, XLSX), documents (DOC, DOCX, ODT), and **Google Drive files** (Docs, Sheets, any file type)
 - **Semantic search** using vector similarity with Gemini embeddings
 - **Full-text search** using PostgreSQL tsvector
 - **Multi-tag system** for organizing indexed files (many-to-many, AND filtering)
@@ -64,7 +64,8 @@ All configuration is via environment variables with sensible defaults:
 | `TITLE_CONFIDENCE_THRESHOLD` | `0.9` | Auto-accept title threshold |
 | `MCP_PORT` | `8080` | MCP server port |
 | `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
-| `OAUTH_CREDENTIALS_PATH` | | Path to OAuth credentials JSON |
+| `OAUTH_CREDENTIALS_PATH` | | Path to OAuth credentials JSON (MCP server auth) |
+| `GOOGLE_CREDENTIALS_FILE` | | Path to Google OAuth credentials JSON (for Google Drive) |
 
 ## CLI Usage
 
@@ -92,6 +93,31 @@ All configuration is via environment variables with sensible defaults:
 # Index a directory (automatically recursive)
 ./bin/localfiles-index-darwin-arm64 index /path/to/documents/ --tags work
 ```
+
+### Index Google Drive Files
+
+Google Drive files are referenced using `gdrive://<fileId>` URIs. The file ID can be found in the Google Drive URL (`https://drive.google.com/file/d/<fileId>/...`).
+
+On first use, a browser window opens for Google OAuth authorization. The token is cached at `~/.localfiles-index/gdrive-token.json`.
+
+```bash
+# Index a Google Doc (exported as Markdown)
+./bin/localfiles-index-darwin-arm64 index gdrive://1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
+
+# Index a Google Sheet (converted to JSONL)
+./bin/localfiles-index-darwin-arm64 index gdrive://1a2b3c4d5e6f --tags data
+
+# Index any Drive file (PDF, image, etc.)
+./bin/localfiles-index-darwin-arm64 index gdrive://file_id_here
+
+# Update a GDrive document (re-index if modified)
+./bin/localfiles-index-darwin-arm64 update gdrive://file_id_here
+
+# Show a GDrive document (displays "Source: Google Drive")
+./bin/localfiles-index-darwin-arm64 show <uuid>
+```
+
+**Google credentials setup**: Create an OAuth 2.0 client ID in Google Cloud Console (Desktop application), download the JSON, and set `GOOGLE_CREDENTIALS_FILE=/path/to/credentials.json`.
 
 ### Search
 
@@ -358,18 +384,28 @@ Test fixtures are generated automatically by `tests/fixtures/generate_fixtures.s
 
 ```
 File Input --> Detect Type --> Process --> Chunk/Analyze --> Embed --> Store
-                 |
-    +------------+------------+------------+
-    |            |            |            |
-  Image        PDF        Text      Spreadsheet
-    |            |            |            |
-  OpenRouter  pdf-extractor  Read      Read+Analyze
-  analyze     + text + imgs  content   (OpenRouter)
-    |            |            |            |
-    +---> Title + Summary + Text Chunks + Embeddings --> PostgreSQL + pgvector
-              (OpenRouter)                  (Gemini)          |
-                                                        Auto-tagging
-                                                     (LLM evaluates tag rules)
+    |              |
+    |   +----------+----------+----------+
+    |   |          |          |          |
+    | Image      PDF       Text    Spreadsheet
+    |   |          |          |          |
+    | OpenRouter pdf-extract  Read   Read+Analyze
+    | analyze   + text+imgs content  (OpenRouter)
+    |   |          |          |          |
+    |   +---> Title + Summary + Text Chunks + Embeddings --> PostgreSQL + pgvector
+    |             (OpenRouter)                  (Gemini)          |
+    |                                                        Auto-tagging
+    |                                                     (LLM evaluates tag rules)
+    |
+    +-- gdrive://<fileId> --> Google Drive API
+              |
+     +--------+---------+
+     |        |         |
+   G.Doc   G.Sheet   Other
+   export  Sheets    download
+   as MD   API→JSONL file
+     |        |         |
+     +---> indexText  Detect Type --> existing pipeline
 ```
 
 ## License

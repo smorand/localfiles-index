@@ -15,6 +15,7 @@ import (
 	"localfiles-index/internal/analyzer"
 	"localfiles-index/internal/config"
 	"localfiles-index/internal/embedding"
+	"localfiles-index/internal/gdrive"
 	"localfiles-index/internal/indexer"
 	"localfiles-index/internal/searcher"
 	"localfiles-index/internal/storage"
@@ -26,12 +27,13 @@ func parseUUID(s string) (uuid.UUID, error) {
 
 // Server implements an MCP HTTP Streamable server.
 type Server struct {
-	app        *fiber.App
-	store      *storage.Store
-	cfg        *config.Config
-	creds      *OAuthCredentials
-	tokenStore *TokenStore
-	port       int
+	app          *fiber.App
+	store        *storage.Store
+	cfg          *config.Config
+	creds        *OAuthCredentials
+	tokenStore   *TokenStore
+	port         int
+	gdriveClient *gdrive.Client // lazily initialized
 }
 
 // NewServer creates a new MCP HTTP server.
@@ -64,6 +66,37 @@ func (s *Server) Start() error {
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown() error {
 	return s.app.Shutdown()
+}
+
+// getGDriveClient lazily initializes the Google Drive client.
+// In server mode, requires a pre-cached token (no browser flow).
+func (s *Server) getGDriveClient(ctx context.Context) (*gdrive.Client, error) {
+	if s.gdriveClient != nil {
+		return s.gdriveClient, nil
+	}
+
+	if s.cfg.GoogleCredentialsFile == "" {
+		return nil, fmt.Errorf("GOOGLE_CREDENTIALS_FILE not configured (required for Google Drive operations)")
+	}
+
+	oauthConfig, err := gdrive.LoadOAuthConfig(s.cfg.GoogleCredentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading Google credentials: %w", err)
+	}
+
+	// In server mode, use cached token only (no browser flow)
+	token, err := gdrive.GetCachedToken(ctx, oauthConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Google Drive auth: %w", err)
+	}
+
+	client, err := gdrive.NewClient(ctx, oauthConfig, token)
+	if err != nil {
+		return nil, fmt.Errorf("creating Google Drive client: %w", err)
+	}
+
+	s.gdriveClient = client
+	return client, nil
 }
 
 func (s *Server) setupRoutes() {
@@ -421,9 +454,24 @@ func (s *Server) toolIndexFile(ctx context.Context, args map[string]interface{})
 	}
 
 	idx := indexer.New(s.store, anlz, emb, s.cfg)
-	result, err := idx.IndexFile(ctx, path, tags)
-	if err != nil {
-		return errorResult(fmt.Sprintf("indexing failed: %v", err)), nil
+
+	var result *indexer.IndexResult
+
+	if gdrive.IsGDrivePath(path) {
+		gdriveClient, err := s.getGDriveClient(ctx)
+		if err != nil {
+			return errorResult(fmt.Sprintf("Google Drive client: %v", err)), nil
+		}
+		fileID := gdrive.ExtractFileID(path)
+		result, err = idx.IndexGDriveFile(ctx, gdriveClient, fileID, tags)
+		if err != nil {
+			return errorResult(fmt.Sprintf("indexing GDrive file failed: %v", err)), nil
+		}
+	} else {
+		result, err = idx.IndexFile(ctx, path, tags)
+		if err != nil {
+			return errorResult(fmt.Sprintf("indexing failed: %v", err)), nil
+		}
 	}
 
 	return textResult(fiber.Map{
@@ -577,6 +625,35 @@ func (s *Server) toolUpdate(ctx context.Context, args map[string]interface{}) (*
 }
 
 func (s *Server) updateSingleDocument(ctx context.Context, idx *indexer.Indexer, doc *storage.Document, force bool) (fiber.Map, bool, error) {
+	// Preserve existing tags
+	var tagNames []string
+	for _, t := range doc.Tags {
+		tagNames = append(tagNames, t.Name)
+	}
+
+	if gdrive.IsGDrivePath(doc.FilePath) {
+		gdriveClient, err := s.getGDriveClient(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+
+		fileID := gdrive.ExtractFileID(doc.FilePath)
+		info, err := gdriveClient.GetFileInfo(ctx, fileID)
+		if err != nil {
+			return fiber.Map{"updated": 0, "unchanged": 0, "missing": 1}, false, nil
+		}
+
+		if !force && !info.ModifiedTime.After(doc.FileMtime) {
+			return fiber.Map{"updated": 0, "unchanged": 1, "missing": 0}, false, nil
+		}
+
+		if _, err := idx.IndexGDriveFile(ctx, gdriveClient, fileID, tagNames); err != nil {
+			return nil, false, err
+		}
+
+		return fiber.Map{"updated": 1, "unchanged": 0, "missing": 0}, true, nil
+	}
+
 	stat, err := os.Stat(doc.FilePath)
 	if err != nil {
 		return fiber.Map{"updated": 0, "unchanged": 0, "missing": 1}, false, nil
@@ -584,12 +661,6 @@ func (s *Server) updateSingleDocument(ctx context.Context, idx *indexer.Indexer,
 
 	if !force && !stat.ModTime().After(doc.FileMtime) {
 		return fiber.Map{"updated": 0, "unchanged": 1, "missing": 0}, false, nil
-	}
-
-	// Preserve existing tags
-	var tagNames []string
-	for _, t := range doc.Tags {
-		tagNames = append(tagNames, t.Name)
 	}
 
 	if _, err := idx.IndexFile(ctx, doc.FilePath, tagNames); err != nil {
@@ -608,6 +679,42 @@ func (s *Server) updateAllDocuments(ctx context.Context, idx *indexer.Indexer, f
 	var updated, unchanged, missing int
 
 	for _, doc := range docs {
+		// Preserve existing tags
+		var tagNames []string
+		for _, t := range doc.Tags {
+			tagNames = append(tagNames, t.Name)
+		}
+
+		if gdrive.IsGDrivePath(doc.FilePath) {
+			gdriveClient, gErr := s.getGDriveClient(ctx)
+			if gErr != nil {
+				slog.Warn("skipping GDrive document (no credentials)", "path", doc.FilePath)
+				missing++
+				continue
+			}
+
+			fileID := gdrive.ExtractFileID(doc.FilePath)
+			info, gErr := gdriveClient.GetFileInfo(ctx, fileID)
+			if gErr != nil {
+				slog.Warn("failed to get GDrive file info", "path", doc.FilePath, "error", gErr)
+				missing++
+				continue
+			}
+
+			if !force && !info.ModifiedTime.After(doc.FileMtime) {
+				unchanged++
+				continue
+			}
+
+			if _, gErr := idx.IndexGDriveFile(ctx, gdriveClient, fileID, tagNames); gErr != nil {
+				slog.Error("failed to re-index GDrive file", "path", doc.FilePath, "error", gErr)
+				continue
+			}
+
+			updated++
+			continue
+		}
+
 		stat, err := os.Stat(doc.FilePath)
 		if err != nil {
 			slog.Warn("file missing from disk", "path", doc.FilePath)
@@ -618,12 +725,6 @@ func (s *Server) updateAllDocuments(ctx context.Context, idx *indexer.Indexer, f
 		if !force && !stat.ModTime().After(doc.FileMtime) {
 			unchanged++
 			continue
-		}
-
-		// Preserve existing tags
-		var tagNames []string
-		for _, t := range doc.Tags {
-			tagNames = append(tagNames, t.Name)
 		}
 
 		if _, err := idx.IndexFile(ctx, doc.FilePath, tagNames); err != nil {

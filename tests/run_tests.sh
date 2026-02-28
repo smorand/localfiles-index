@@ -50,6 +50,7 @@ TEST_ORDER=(
     test_update         # Re-index + conversion
     test_cli_workflow   # Full workflow (heaviest)
     test_mcp            # MCP server + REST API
+    test_gdrive         # Google Drive indexing (heaviest network, skipped without creds)
 )
 
 for test_name in "${TEST_ORDER[@]}"; do

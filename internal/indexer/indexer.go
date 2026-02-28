@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"localfiles-index/internal/analyzer"
 	"localfiles-index/internal/config"
 	"localfiles-index/internal/embedding"
+	"localfiles-index/internal/gdrive"
 	"localfiles-index/internal/storage"
 )
 
@@ -209,6 +211,233 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string, tagNames []s
 
 	slog.Info("file indexed successfully",
 		"path", absPath,
+		"document_id", docID,
+		"title", title,
+		"chunks", len(chunks),
+		"images", len(images),
+		"tags", allTags,
+	)
+
+	return &IndexResult{
+		DocumentID: docID,
+		Title:      title,
+		ChunkCount: len(chunks),
+		ImageCount: len(images),
+		Tags:       allTags,
+	}, nil
+}
+
+// IndexGDriveFile indexes a Google Drive file by its file ID.
+func (idx *Indexer) IndexGDriveFile(ctx context.Context, gdriveClient *gdrive.Client, fileID string, tagNames []string) (*IndexResult, error) {
+	// Get file metadata from Drive API
+	info, err := gdriveClient.GetFileInfo(ctx, fileID)
+	if err != nil {
+		return nil, fmt.Errorf("getting Drive file info: %w", err)
+	}
+
+	slog.Info("indexing Google Drive file", "id", fileID, "name", info.Name, "mime", info.MimeType)
+
+	// Determine how to handle the file and get a temp path
+	var tmpPath string
+	var docType string
+
+	switch info.MimeType {
+	case gdrive.MimeGoogleSheet:
+		// Sheets → JSONL via Sheets API
+		tmpPath, err = gdriveClient.ReadSpreadsheet(ctx, fileID)
+		if err != nil {
+			return nil, fmt.Errorf("reading Google Sheet: %w", err)
+		}
+		docType = "spreadsheet"
+
+	case gdrive.MimeGoogleDoc:
+		// Docs → Markdown export
+		tmpPath, err = gdriveClient.ExportFile(ctx, fileID, info)
+		if err != nil {
+			return nil, fmt.Errorf("exporting Google Doc: %w", err)
+		}
+		docType = "text"
+
+	default:
+		// Other files → download and detect type
+		tmpPath, err = gdriveClient.DownloadFile(ctx, fileID, info)
+		if err != nil {
+			return nil, fmt.Errorf("downloading Drive file: %w", err)
+		}
+	}
+	defer os.Remove(tmpPath)
+
+	// For non-native files, detect the file type from the downloaded content
+	if docType == "" {
+		fileInfo, err := DetectFileType(tmpPath)
+		if err != nil {
+			return nil, fmt.Errorf("detecting file type: %w", err)
+		}
+		switch fileInfo.Type {
+		case FileTypeImage:
+			docType = "image"
+		case FileTypePDF:
+			docType = "pdf"
+		case FileTypeText:
+			docType = "text"
+		case FileTypeSpreadsheet:
+			docType = "spreadsheet"
+		default:
+			docType = "other"
+		}
+	}
+
+	// Build the gdrive:// path for storage
+	gdrivePath := gdrive.GDrivePrefix + fileID
+
+	// Check if document already exists
+	existingDoc, err := idx.store.GetDocumentByPath(ctx, gdrivePath)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("checking existing document: %w", err)
+		}
+		existingDoc = nil
+	}
+	if existingDoc != nil {
+		slog.Info("document already exists, re-indexing", "id", existingDoc.ID)
+		if err := idx.store.DeleteDocumentImages(ctx, existingDoc.ID); err != nil {
+			return nil, fmt.Errorf("deleting old images: %w", err)
+		}
+		if err := idx.store.DeleteDocumentChunks(ctx, existingDoc.ID); err != nil {
+			return nil, fmt.Errorf("deleting old chunks: %w", err)
+		}
+	}
+
+	// Process the temp file through the appropriate pipeline
+	var chunks []*storage.Chunk
+	var images []*storage.Image
+	var title string
+	var titleConfidence float64
+
+	switch {
+	case info.MimeType == gdrive.MimeGoogleSheet || docType == "spreadsheet":
+		// JSONL from Sheets → indexText pipeline (generates title + summary + chunks)
+		title, titleConfidence, chunks, err = idx.indexText(ctx, tmpPath)
+	case info.MimeType == gdrive.MimeGoogleDoc || docType == "text":
+		title, titleConfidence, chunks, err = idx.indexText(ctx, tmpPath)
+	case docType == "image":
+		title, titleConfidence, chunks, images, err = idx.indexImage(ctx, tmpPath)
+	case docType == "pdf":
+		title, titleConfidence, chunks, images, err = idx.indexPDF(ctx, tmpPath)
+	case docType == "other":
+		title, titleConfidence, chunks, images, err = idx.indexDocument(ctx, tmpPath)
+	default:
+		return nil, fmt.Errorf("unsupported file type for GDrive file: %s", info.MimeType)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("processing GDrive file: %w", err)
+	}
+
+	// Build metadata JSONB
+	metadata := map[string]interface{}{
+		"gdrive_id":   info.ID,
+		"gdrive_name": info.Name,
+		"gdrive_mime": info.MimeType,
+		"is_native":   info.IsNative,
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+
+	// Determine MIME type for storage
+	storedMime := info.MimeType
+	if info.MimeType == gdrive.MimeGoogleDoc {
+		storedMime = "text/markdown"
+	} else if info.MimeType == gdrive.MimeGoogleSheet {
+		storedMime = "application/jsonl"
+	}
+
+	// Create or update document
+	var docID uuid.UUID
+	if existingDoc != nil {
+		existingDoc.FileMtime = info.ModifiedTime
+		existingDoc.Title = title
+		existingDoc.TitleConfidence = titleConfidence
+		existingDoc.DocumentType = docType
+		existingDoc.MimeType = storedMime
+		existingDoc.FileSize = info.Size
+		existingDoc.Metadata = string(metadataJSON)
+		existingDoc.IndexedAt = time.Now()
+		existingDoc.UpdatedAt = time.Now()
+
+		if err := idx.store.UpdateDocument(ctx, existingDoc); err != nil {
+			return nil, fmt.Errorf("updating document: %w", err)
+		}
+		docID = existingDoc.ID
+	} else {
+		doc := &storage.Document{
+			FilePath:        gdrivePath,
+			FileMtime:       info.ModifiedTime,
+			Title:           title,
+			TitleConfidence: titleConfidence,
+			DocumentType:    docType,
+			MimeType:        storedMime,
+			FileSize:        info.Size,
+			Metadata:        string(metadataJSON),
+		}
+
+		if err := idx.store.CreateDocument(ctx, doc); err != nil {
+			return nil, fmt.Errorf("creating document: %w", err)
+		}
+		docID = doc.ID
+	}
+
+	// Generate embeddings (batch)
+	var texts []string
+	for _, chunk := range chunks {
+		chunk.DocumentID = docID
+		texts = append(texts, chunk.Content)
+	}
+
+	embeddings, err := idx.embedder.EmbedDocuments(ctx, texts)
+	if err != nil {
+		slog.Warn("failed to generate batch embeddings", "error", err)
+	} else {
+		for i, emb := range embeddings {
+			chunks[i].Embedding = emb
+		}
+	}
+
+	// Bulk insert chunks
+	if err := idx.store.CreateChunks(ctx, chunks); err != nil {
+		return nil, fmt.Errorf("creating chunks: %w", err)
+	}
+
+	// Create images
+	for _, img := range images {
+		img.DocumentID = docID
+		if len(chunks) > 0 {
+			img.ChunkID = &chunks[0].ID
+		}
+		if err := idx.store.CreateImage(ctx, img); err != nil {
+			return nil, fmt.Errorf("creating image: %w", err)
+		}
+	}
+
+	// Auto-tagging
+	allTags := make([]string, len(tagNames))
+	copy(allTags, tagNames)
+
+	autoTags, err := idx.autoTag(ctx, title, chunks)
+	if err != nil {
+		slog.Warn("auto-tagging failed, continuing with manual tags only", "error", err)
+	} else {
+		allTags = mergeUnique(allTags, autoTags)
+	}
+
+	if len(allTags) > 0 {
+		if err := idx.store.SetDocumentTags(ctx, docID, allTags); err != nil {
+			return nil, fmt.Errorf("setting document tags: %w", err)
+		}
+	}
+
+	slog.Info("GDrive file indexed successfully",
+		"gdrive_id", fileID,
+		"name", info.Name,
 		"document_id", docID,
 		"title", title,
 		"chunks", len(chunks),
